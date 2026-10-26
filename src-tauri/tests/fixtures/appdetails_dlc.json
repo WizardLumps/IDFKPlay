@@ -1,0 +1,11 @@
+{
+  "323180": {
+    "success": true,
+    "data": {
+      "type": "DLC",
+      "name": "Portal 2 - Peer Review",
+      "steam_appid": 323180,
+      "categories": [{ "id": 2, "description": "Single-player" }]
+    }
+  }
+}

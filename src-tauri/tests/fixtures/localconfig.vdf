@@ -1,0 +1,47 @@
+"UserLocalConfigStore"
+{
+	"Broadcast"
+	{
+		"Permissions"		"1"
+	}
+	"friends"
+	{
+		"PersonaName"		"Main Player"
+	}
+	"Software"
+	{
+		"valve"
+		{
+			"Steam"
+			{
+				"SteamDefaultDialog"		"#app_games"
+				"Apps"
+				{
+					"620"
+					{
+						"LastPlayed"		"1728000000"
+						"Playtime"		"754"
+						"Playtime2wks"		"35"
+						"cloud"
+						{
+							"last_sync_state"		"synchronized"
+						}
+					}
+					"1145360"
+					{
+						"lastplayed"		"1729500000"
+						"playtime"		"61"
+					}
+					"570"
+					{
+						"LastPlayed"		"0"
+					}
+					"440"
+					{
+						"PLAYTIME"		"9001"
+					}
+				}
+			}
+		}
+	}
+}

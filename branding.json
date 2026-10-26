@@ -1,0 +1,43 @@
+{
+  "appName": "IDFKPlay",
+  "tagline": "Because you don't f***ing know what to play.",
+  "copy": {
+    "justPlay": "Just Play",
+    "justPlaySub": "Anything. Seriously, anything.",
+    "somethingNew": "Something New",
+    "somethingNewSub": "Stuff you bought and never touched.",
+    "settings": "Settings",
+    "back": "Back",
+    "installedOnly": "Installed only",
+    "installedOnlyForced": "Add a Steam Web API key in Settings to include games you haven't installed.",
+    "apiBanner": "Only installed games for now. Add a free Steam Web API key in Settings to unlock the rest of your library.",
+    "apiBannerAction": "Open Settings",
+    "dismiss": "Dismiss",
+    "learning": "Learning your library…",
+    "loading": "Looking through your Steam library…",
+    "rerolls": ["Fine.", "Reroll? Seriously?"],
+    "outOfRerolls": "No. You're playing this.",
+    "emptyResult": "Nothing matches. Loosen a filter.",
+    "emptyLibrary": "No games found. Check your Steam folder in Settings.",
+    "launchNow": "Launch now",
+    "reroll": "Reroll",
+    "cancel": "Cancel",
+    "blacklist": "Never show this again",
+    "launching": "Handing it to Steam…",
+    "launched": "Sent to Steam. Have fun.",
+    "installed": "Installed",
+    "notInstalled": "Not installed",
+    "collections": "Collections",
+    "favorites": "Favorites",
+    "moods": {
+      "action": "Action",
+      "adventure": "Adventure",
+      "puzzle": "Puzzle",
+      "rpg": "RPG",
+      "strategy": "Strategy",
+      "multiplayer": "Multiplayer / Co-op",
+      "controller": "Controller",
+      "vr": "VR"
+    }
+  }
+}

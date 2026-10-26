@@ -1,0 +1,369 @@
+pub mod error;
+pub mod jsonfile;
+pub mod library;
+pub mod metadata;
+pub mod picker;
+pub mod secrets;
+pub mod settings;
+pub mod source;
+pub mod steam;
+pub mod vdf;
+
+use library::{ApiStatus, LibraryGame, LibraryView, RawLibrary};
+use metadata::{MetaStore, Progress};
+use picker::{PickRequest, PickRules, Rerolls};
+use serde::{Deserialize, Serialize};
+use settings::{AfterLaunch, Settings};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use steam::webapi::{self, OwnedGame};
+use steam::SteamSource;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
+
+const OWNED_CACHE_FILE: &str = "owned-games.json";
+
+struct AppState {
+    config_dir: PathBuf,
+    settings: Mutex<Settings>,
+    http: reqwest::Client,
+    /// Last scan; views are rebuilt from it as metadata arrives.
+    library: Mutex<Option<RawLibrary>>,
+    meta: Arc<MetaStore>,
+    rerolls: Mutex<Rerolls>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+impl AppState {
+    fn settings(&self) -> Settings {
+        lock(&self.settings).clone()
+    }
+}
+
+/// Last good owned-games response, so uninstalled games survive going offline.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnedCache {
+    steam_id: String,
+    fetched_at: u64,
+    games: Vec<OwnedGame>,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+async fn owned_games(state: &AppState, steam_id: Option<&str>) -> (Option<Vec<OwnedGame>>, ApiStatus) {
+    let Some(key) = secrets::load_api_key(&state.config_dir) else {
+        return (None, ApiStatus::NoKey);
+    };
+    let Some(steam_id) = steam_id else {
+        return (None, ApiStatus::NoAccount);
+    };
+    let cache_path = state.config_dir.join(OWNED_CACHE_FILE);
+    match webapi::fetch_owned_games(&state.http, &key, steam_id).await {
+        Ok(games) => {
+            let cache = OwnedCache { steam_id: steam_id.to_string(), fetched_at: now_secs(), games };
+            if let Err(e) = jsonfile::write(&cache_path, &cache) {
+                eprintln!("couldn't cache owned games: {e}");
+            }
+            let count = cache.games.len();
+            (Some(cache.games), ApiStatus::Ok { count })
+        }
+        Err(e) => match jsonfile::read::<OwnedCache>(&cache_path).filter(|c| c.steam_id == steam_id) {
+            Some(c) => {
+                let status = ApiStatus::Cached { count: c.games.len(), fetched_at: c.fetched_at, message: e.to_string() };
+                (Some(c.games), status)
+            }
+            None => (None, ApiStatus::Error { message: e.to_string() }),
+        },
+    }
+}
+
+async fn scan_library(state: &AppState) -> Result<RawLibrary, String> {
+    let source = SteamSource::new(state.settings());
+    let scan = tauri::async_runtime::spawn_blocking(move || source.scan_detailed())
+        .await
+        .map_err(|e| format!("The library scan stopped unexpectedly: {e}"))??;
+    let (owned, api) = owned_games(state, scan.info.selected_account.as_deref()).await;
+    Ok(RawLibrary {
+        info: scan.info,
+        local: scan.games,
+        owned,
+        collections: scan.collections,
+        api,
+        warnings: scan.warnings,
+    })
+}
+
+/// The last scan, scanning first if there is none or `refresh` is set.
+async fn current_library(app: AppHandle, state: &AppState, refresh: bool) -> Result<RawLibrary, String> {
+    if !refresh {
+        if let Some(raw) = lock(&state.library).clone() {
+            return Ok(raw);
+        }
+    }
+    let raw = scan_library(state).await?;
+    *lock(&state.library) = Some(raw.clone());
+    // The UI may load cached art from Steam's library cache, and nothing else on disk.
+    let cache = steam::art::library_cache_dir(Path::new(&raw.info.steam_path));
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&cache, true) {
+        eprintln!("couldn't allow art folder {}: {e}", cache.display());
+    }
+    // Only (re)start metadata fetching after a scan, so view rebuilds can't loop.
+    let needed = library::ids_needing_meta(&raw, &state.meta.snapshot());
+    state.meta.start(app, state.http.clone(), needed);
+    Ok(raw)
+}
+
+/// The picker's game list. Scans on first call or when `refresh` is set; otherwise
+/// rebuilds from the last scan plus whatever metadata has arrived since.
+#[tauri::command]
+async fn get_library(app: AppHandle, state: State<'_, AppState>, refresh: bool) -> Result<LibraryView, String> {
+    let raw = current_library(app, &state, refresh).await?;
+    Ok(library::build_view(&raw, &state.meta.snapshot()))
+}
+
+/// Tiles shown in the spin before landing on the pick.
+const REEL_LEN: usize = 14;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReelItem {
+    app_id: u32,
+    name: String,
+    portrait: Vec<steam::art::ArtSource>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickOutcome {
+    game: Option<LibraryGame>,
+    /// Art for `game`.
+    art: Option<steam::art::GameArt>,
+    /// Other eligible games to spin through (may be empty).
+    reel: Vec<ReelItem>,
+    /// How many games matched (before excluding already-shown ones).
+    eligible: usize,
+    rerolls_left: u32,
+    /// A reroll was asked for but none are left; `game` is `None`.
+    reroll_denied: bool,
+}
+
+#[tauri::command]
+async fn pick_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut request: PickRequest,
+    reroll: bool,
+) -> Result<PickOutcome, String> {
+    let raw = current_library(app, &state, false).await?;
+    if reroll && !lock(&state.rerolls).try_use() {
+        return Ok(PickOutcome {
+            game: None,
+            art: None,
+            reel: Vec::new(),
+            eligible: 0,
+            rerolls_left: 0,
+            reroll_denied: true,
+        });
+    }
+    // Without owned games, uninstalled ones aren't known, so the toggle is forced on.
+    if !raw.api.has_owned() {
+        request.installed_only = true;
+    }
+    let view = library::build_view(&raw, &state.meta.snapshot());
+    let settings = state.settings();
+    let members = library::collection_members(&raw.collections, &request.collections);
+    let rules = PickRules {
+        something_new_minutes: (settings.something_new_hours * 60.0).round() as u32,
+        blacklist: &settings.blacklist,
+        collection_members: members.as_ref(),
+        hidden: if settings.skip_steam_hidden { &raw.collections.hidden } else { &[] },
+    };
+    let pool = picker::eligible(&view.games, &request, &rules);
+    let game = picker::choose(&pool, &request.exclude, picker::random_u64()).cloned();
+
+    let steam_path = PathBuf::from(&raw.info.steam_path);
+    let art = game.as_ref().map(|g| steam::art::game_art(Some(&steam_path), g.game.app_id));
+    let reel = game
+        .as_ref()
+        .map(|g| picker::reel(&pool, g.game.app_id, REEL_LEN, picker::random_u64()))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| ReelItem {
+            app_id: g.game.app_id,
+            name: g.game.name.clone(),
+            portrait: steam::art::game_art(Some(&steam_path), g.game.app_id).portrait,
+        })
+        .collect();
+    Ok(PickOutcome {
+        game,
+        art,
+        reel,
+        eligible: pool.len(),
+        rerolls_left: lock(&state.rerolls).left(),
+        reroll_denied: false,
+    })
+}
+
+/// Art candidates for a game, local cache first then CDN.
+#[tauri::command]
+fn get_art(state: State<'_, AppState>, app_id: u32) -> steam::art::GameArt {
+    let steam_path = lock(&state.library).as_ref().map(|r| PathBuf::from(&r.info.steam_path));
+    steam::art::game_art(steam_path.as_deref(), app_id)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchOutcome {
+    /// The app is about to close (after-launch setting).
+    closing: bool,
+}
+
+/// Hands the game to Steam: run if installed, otherwise Steam's install dialog.
+#[tauri::command]
+async fn launch_game(app: AppHandle, state: State<'_, AppState>, app_id: u32) -> Result<LaunchOutcome, String> {
+    let raw = current_library(app.clone(), &state, false).await?;
+    let installed = library::merge(&raw.local, raw.owned.as_deref())
+        .iter()
+        .find(|g| g.app_id == app_id)
+        .map(|g| g.installed)
+        .ok_or("That game isn't in your library anymore. Refresh and try again.")?;
+    let url = if installed {
+        format!("steam://rungameid/{app_id}")
+    } else {
+        format!("steam://install/{app_id}")
+    };
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| format!("Couldn't hand the game to Steam ({e}). Is Steam installed?"))?;
+
+    let closing = state.settings().after_launch == AfterLaunch::Close;
+    if closing {
+        // Let the response reach the UI before exiting.
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            handle.exit(0);
+        });
+    }
+    Ok(LaunchOutcome { closing })
+}
+
+#[tauri::command]
+fn set_blacklisted(state: State<'_, AppState>, app_id: u32, blacklisted: bool) -> Result<Settings, String> {
+    let mut settings = state.settings();
+    settings.blacklist.retain(|&id| id != app_id);
+    if blacklisted {
+        settings.blacklist.push(app_id);
+    }
+    store_settings(&state, settings)
+}
+
+#[tauri::command]
+fn get_metadata_progress(state: State<'_, AppState>) -> Progress {
+    state.meta.progress()
+}
+
+/// Clears the tag cache and re-learns everything for the current library.
+#[tauri::command]
+fn rebuild_metadata(app: AppHandle, state: State<'_, AppState>) {
+    state.meta.clear(&app);
+    if let Some(raw) = lock(&state.library).clone() {
+        let needed = library::ids_needing_meta(&raw, &state.meta.snapshot());
+        state.meta.start(app, state.http.clone(), needed);
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiKeyStatus {
+    has_key: bool,
+    storage: Option<secrets::KeyStorage>,
+}
+
+fn key_status(dir: &Path, storage: Option<secrets::KeyStorage>) -> ApiKeyStatus {
+    ApiKeyStatus { has_key: secrets::load_api_key(dir).is_some(), storage }
+}
+
+#[tauri::command]
+fn get_api_key_status(state: State<'_, AppState>) -> ApiKeyStatus {
+    key_status(&state.config_dir, None)
+}
+
+/// Saves the key (or removes it with `null`). Call `get_library(refresh)` afterwards.
+#[tauri::command]
+fn set_api_key(state: State<'_, AppState>, key: Option<String>) -> Result<ApiKeyStatus, String> {
+    let storage = secrets::store_api_key(&state.config_dir, key.as_deref())?;
+    Ok(key_status(&state.config_dir, storage))
+}
+
+#[tauri::command]
+fn get_settings(state: State<'_, AppState>) -> Settings {
+    state.settings()
+}
+
+fn store_settings(state: &AppState, settings: Settings) -> Result<Settings, String> {
+    let settings = settings.normalized();
+    settings::save(&state.config_dir, &settings)
+        .map_err(|e| format!("Couldn't save settings to {}: {e}", state.config_dir.display()))?;
+    *lock(&state.settings) = settings.clone();
+    Ok(settings)
+}
+
+/// Saves and returns the normalized settings. Call `get_library(refresh)` after Steam-related changes.
+#[tauri::command]
+fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<Settings, String> {
+    store_settings(&state, settings)
+}
+
+#[tauri::command]
+fn rerolls_left(state: State<'_, AppState>) -> u32 {
+    lock(&state.rerolls).left()
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        // Remembers window size/position between launches.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .setup(|app| {
+            let config_dir = settings::config_dir(app.path().app_config_dir()?);
+            let http = reqwest::Client::builder()
+                .user_agent(concat!("IDFKPlay/", env!("CARGO_PKG_VERSION")))
+                .timeout(std::time::Duration::from_secs(20))
+                .build()?;
+            app.manage(AppState {
+                settings: Mutex::new(settings::load(&config_dir)),
+                meta: Arc::new(MetaStore::load(&config_dir)),
+                library: Mutex::new(None),
+                rerolls: Mutex::new(Rerolls::default()),
+                http,
+                config_dir,
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_library,
+            pick_game,
+            get_art,
+            launch_game,
+            set_blacklisted,
+            rerolls_left,
+            get_metadata_progress,
+            rebuild_metadata,
+            get_api_key_status,
+            set_api_key,
+            get_settings,
+            save_settings
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

@@ -1,0 +1,11 @@
+{
+  "appid": 620,
+  "name": "Portal 2",
+  "developer": "Valve",
+  "tags": {
+    "Co-op": 4100,
+    "Puzzle": 5200,
+    "First-Person": 3000,
+    "Sci-fi": 3000
+  }
+}

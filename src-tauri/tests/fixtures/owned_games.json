@@ -1,0 +1,10 @@
+{
+  "response": {
+    "game_count": 3,
+    "games": [
+      { "appid": 620, "name": "Portal 2", "playtime_forever": 800, "rtime_last_played": 1729900000, "img_icon_url": "abc" },
+      { "appid": 1145360, "name": "Hades", "playtime_forever": 0, "rtime_last_played": 0 },
+      { "appid": 400, "name": "Portal", "playtime_forever": 45 }
+    ]
+  }
+}

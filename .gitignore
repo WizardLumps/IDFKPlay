@@ -1,0 +1,13 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+
+# Videos are too large for the repo.
+*.mp4
+*.mov
+
+# Local working notes, not part of the project.
+IDFKPlay_ClaudeCode_Prompt.md
+.claude/

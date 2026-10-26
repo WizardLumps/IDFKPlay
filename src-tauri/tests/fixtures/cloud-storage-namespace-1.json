@@ -1,0 +1,10 @@
+[
+  ["user-collections.favorite", {"key":"user-collections.favorite","timestamp":1779611006,"value":"{\"id\":\"favorite\",\"name\":\"Favorites\",\"added\":[620,1145360,620],\"removed\":[]}","version":"1489"}],
+  ["user-collections.hidden", {"key":"user-collections.hidden","timestamp":1779611006,"value":"{\"id\":\"hidden\",\"name\":\"Hidden\",\"added\":[228980,570],\"removed\":[]}","version":"12"}],
+  ["showcases.0", {"key":"showcases.0","timestamp":1,"value":"{}","version":"1"}],
+  ["user-collections.uc-vzu6UR4zbdzd", {"key":"user-collections.uc-vzu6UR4zbdzd","timestamp":1,"value":"{\"id\":\"uc-vzu6UR4zbdzd\",\"name\":\"Flight\",\"added\":[502500,667970,223750],\"removed\":[],\"filterSpec\":{\"nFormatVersion\":2,\"strSearchText\":\"\",\"filterGroups\":[{\"rgOptions\":[15045],\"bAcceptUnion\":false}]}}","version":"3"}],
+  ["user-collections.uc-a4QLjN4SpZXn", {"key":"user-collections.uc-a4QLjN4SpZXn","timestamp":1,"value":"{\"id\":\"uc-a4QLjN4SpZXn\",\"name\":\"Driving\",\"added\":[284160,646910,320140],\"removed\":[646910]}","version":"4"}],
+  ["user-collections.uc-AVdlYZk0WJC", {"key":"user-collections.uc-AVdlYZk0WJC","timestamp":1,"is_deleted":true,"version":"5"}],
+  ["user-collections.uc-noname", {"key":"user-collections.uc-noname","timestamp":1,"value":"{\"id\":\"uc-noname\",\"name\":\"\",\"added\":[1],\"removed\":[]}","version":"1"}],
+  ["NewContentRollup_620", {"key":"NewContentRollup_620","timestamp":1,"value":"1","version":"1"}]
+]

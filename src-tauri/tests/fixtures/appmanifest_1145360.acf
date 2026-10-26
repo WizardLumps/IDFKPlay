@@ -1,0 +1,10 @@
+// Mixed-case keys on purpose: lookups must be case-insensitive.
+"appstate"
+{
+	"AppID"		"1145360"
+	"Universe"		"1"
+	"Name"		"Hades"
+	"stateflags"		"6"
+	"InstallDir"		"Hades"
+	"sizeondisk"		"15422058496"
+}

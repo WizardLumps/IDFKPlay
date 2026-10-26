@@ -1,0 +1,22 @@
+"users"
+{
+	"76561198000000001"
+	{
+		"AccountName"		"mainaccount"
+		"PersonaName"		"Main Player"
+		"RememberPassword"		"1"
+		"WantsOfflineMode"		"0"
+		"SkipOfflineModeWarning"		"0"
+		"AllowAutoLogin"		"1"
+		"MostRecent"		"1"
+		"Timestamp"		"1729000000"
+	}
+	"76561198012345678"
+	{
+		"AccountName"		"altaccount"
+		"PersonaName"		"Alt \"Smurf\" Account"
+		"RememberPassword"		"1"
+		"MostRecent"		"0"
+		"Timestamp"		"1730000000"
+	}
+}
