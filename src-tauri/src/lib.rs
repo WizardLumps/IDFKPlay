@@ -186,25 +186,32 @@ async fn pick_game(
     let pool = picker::eligible(&view.games, &request, &rules);
     let limit = settings.rerolls_per_session;
 
-    // Nothing matches: say so without spending a reroll.
-    let (game, charged, locked) = if pool.is_empty() {
-        (None, false, false)
-    } else {
+    // Everything that touches the session happens under this one lock. (Taking it twice
+    // in one expression deadlocks: std's Mutex isn't re-entrant.)
+    let (game, charged, locked, rerolls_left, rerolls_used) = {
         let mut session = lock(&state.session);
-        let decision = session.decide(kind, limit);
-        // A locked game that's gone since (e.g. blacklisted) falls back to a normal pick.
-        let locked_game = match decision {
-            PickDecision::Locked(id) => view.games.iter().find(|g| g.game.app_id == id && !settings.blacklist.contains(&id)),
-            _ => None,
+        // Nothing matches: say so without spending a reroll.
+        let (game, charged, locked) = if pool.is_empty() {
+            (None, false, false)
+        } else {
+            let decision = session.decide(kind, limit);
+            // A locked game that's gone since (e.g. blacklisted) falls back to a normal pick.
+            let locked_game = match decision {
+                PickDecision::Locked(id) => {
+                    view.games.iter().find(|g| g.game.app_id == id && !settings.blacklist.contains(&id))
+                }
+                _ => None,
+            };
+            let (game, locked) = match locked_game {
+                Some(g) => (Some(g.clone()), true),
+                None => (picker::choose(&pool, &request.exclude, picker::random_u64()).cloned(), false),
+            };
+            if let Some(g) = &game {
+                session.shown(g.game.app_id);
+            }
+            (game, decision == PickDecision::Charged, locked)
         };
-        let (game, locked) = match locked_game {
-            Some(g) => (Some(g.clone()), true),
-            None => (picker::choose(&pool, &request.exclude, picker::random_u64()).cloned(), false),
-        };
-        if let Some(g) = &game {
-            session.shown(g.game.app_id);
-        }
-        (game, decision == PickDecision::Charged, locked)
+        (game, charged, locked, session.left(limit), session.used())
     };
 
     let steam_path = PathBuf::from(&raw.info.steam_path);
@@ -225,8 +232,8 @@ async fn pick_game(
         art,
         reel,
         eligible: pool.len(),
-        rerolls_left: lock(&state.session).left(limit),
-        rerolls_used: lock(&state.session).used(),
+        rerolls_left,
+        rerolls_used,
         charged,
         locked,
     })
