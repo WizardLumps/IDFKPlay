@@ -1,6 +1,6 @@
 [package]
 name = "idfkplay"
-version = "0.1.0"
+version = "0.1.1"
 description = "Random Steam game picker and launcher"
 edition = "2021"
 
