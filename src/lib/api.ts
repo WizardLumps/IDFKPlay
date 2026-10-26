@@ -12,7 +12,15 @@ export interface Settings {
   blacklist: number[];
   hideApiBanner: boolean;
   skipSteamHidden: boolean;
+  /** Rerolls per app session; null = unlimited. */
+  rerollsPerSession: number | null;
 }
+
+/** Highest finite reroll setting (mirrors settings::MAX_REROLLS). */
+export const MAX_REROLLS = 10;
+
+/** fresh = Just Play / Something New, reroll = Reroll button, replace = after "Never show this again". */
+export type PickKind = "fresh" | "reroll" | "replace";
 
 export interface CollectionInfo {
   id: string;
@@ -50,8 +58,13 @@ export interface PickOutcome {
   art: GameArt | null;
   reel: ReelItem[];
   eligible: number;
-  rerollsLeft: number;
-  rerollDenied: boolean;
+  /** null = unlimited. */
+  rerollsLeft: number | null;
+  rerollsUsed: number;
+  /** This pick spent a reroll. */
+  charged: boolean;
+  /** Out of rerolls: same game as before. */
+  locked: boolean;
 }
 
 export interface Game {
@@ -165,13 +178,13 @@ export const api = {
   getSettings: () => call<Settings>("get_settings"),
   saveSettings: (settings: Settings) => call<Settings>("save_settings", { settings }),
   getLibrary: (refresh = false) => call<LibraryView>("get_library", { refresh }),
-  pickGame: (request: PickRequest, reroll: boolean) => call<PickOutcome>("pick_game", { request, reroll }),
+  pickGame: (request: PickRequest, kind: PickKind) => call<PickOutcome>("pick_game", { request, kind }),
   getArt: (appId: number) => call<GameArt>("get_art", { appId }),
   getBackdrop: (count: number) => call<BackdropItem[]>("get_backdrop", { count }),
   launchGame: (appId: number) => call<{ closing: boolean }>("launch_game", { appId }),
   setBlacklisted: (appId: number, blacklisted: boolean) =>
     call<Settings>("set_blacklisted", { appId, blacklisted }),
-  rerollsLeft: () => call<number>("rerolls_left"),
+  rerollsLeft: () => call<number | null>("rerolls_left"),
   getMetadataProgress: () => call<MetaProgress>("get_metadata_progress"),
   rebuildMetadata: () => call<void>("rebuild_metadata"),
   getApiKeyStatus: () => call<ApiKeyStatus>("get_api_key_status"),

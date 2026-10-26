@@ -13,7 +13,14 @@
 
   const c = branding.copy;
   const MOODS: Mood[] = ["action", "adventure", "puzzle", "rpg", "strategy", "multiplayer", "controller", "vr"];
-  const REROLLS_PER_SESSION = 2; // mirrors picker::REROLLS_PER_SESSION
+
+  /** Line under a pick: snark that escalates with rerolls spent, or the lock message. */
+  function pickLine(out: PickOutcome): string {
+    if (out.locked) return c.lockedPick;
+    if (!out.charged) return "";
+    // 1st reroll -> rerolls[0], 2nd -> rerolls[1], then the last line repeats.
+    return c.rerolls[Math.min(Math.max(out.rerollsUsed - 1, 0), c.rerolls.length - 1)] ?? "";
+  }
 
   // Chip selections last for this session only.
   let moods = $state<Mood[]>([]);
@@ -28,7 +35,8 @@
     spinKey: number;
     mode: Mode;
     shown: number[];
-    rerollsLeft: number;
+    /** null = unlimited. */
+    rerollsLeft: number | null;
     line: string;
     status: string;
     error: string;
@@ -74,7 +82,8 @@
   async function pick(mode: Mode) {
     message = "";
     try {
-      const out = await api.pickGame(request(mode), false);
+      // After Cancel, a fresh pick costs a reroll (or brings the same game back).
+      const out = await api.pickGame(request(mode), "fresh");
       if (!out.game || !out.art) {
         const filtered = moods.length > 0 || activeCollections.length > 0 || mode === "somethingNew" || installedOnly();
         message = filtered ? c.emptyResult : c.emptyLibrary;
@@ -90,7 +99,7 @@
         mode,
         shown: [out.game.appId],
         rerollsLeft: out.rerollsLeft,
-        line: "",
+        line: pickLine(out),
         status: "",
         error: "",
         busy: false,
@@ -107,13 +116,11 @@
     r.busy = true;
     r.error = "";
     try {
-      const out = await api.pickGame(request(r.mode, r.shown), true);
+      const out = await api.pickGame(request(r.mode, r.shown), "reroll");
       r.rerollsLeft = out.rerollsLeft;
       if (out.game) {
         showPick(r, out);
-        // Escalate with rerolls used this session: 1st -> rerolls[0], 2nd -> rerolls[1]…
-        const used = REROLLS_PER_SESSION - out.rerollsLeft;
-        r.line = c.rerolls[Math.min(Math.max(used - 1, 0), c.rerolls.length - 1)] ?? "";
+        r.line = pickLine(out);
       }
     } catch (e) {
       r.error = (e as Error).message;
@@ -130,9 +137,10 @@
     try {
       app.settings = await api.setBlacklisted(r.game.appId, true);
       // A free replacement: blacklisting doesn't cost a reroll.
-      const out = await api.pickGame(request(r.mode, r.shown), false);
+      const out = await api.pickGame(request(r.mode, r.shown), "replace");
       if (out.game) {
         showPick(r, out);
+        r.rerollsLeft = out.rerollsLeft;
         r.line = "";
       } else {
         reveal = null;

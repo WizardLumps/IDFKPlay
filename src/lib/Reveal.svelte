@@ -20,7 +20,8 @@
     reel: ReelItem[];
     /** Changes for every new pick (first pick, reroll, blacklist replacement): replays the spin. */
     spinKey: number;
-    rerollsLeft: number;
+    /** null = unlimited. */
+    rerollsLeft: number | null;
     /** Snarky line after a reroll. */
     line: string;
     status: string;
@@ -142,7 +143,7 @@
     if (e.key === "Escape" && !launched) onCancel();
     if (stage !== "reveal" || busy || launched) return;
     if (e.key === "Enter") onLaunch();
-    if ((e.key === "r" || e.key === "R") && rerollsLeft > 0) onReroll();
+    if ((e.key === "r" || e.key === "R") && rerollsLeft !== 0) onReroll();
   }
 
   // Tile size for the reel (kept in sync with the CSS below).
@@ -230,7 +231,7 @@
                 disabled={busy || launched || rerollsLeft === 0}
                 title={rerollsLeft === 0 ? c.outOfRerolls : "R"}
               >
-                {rerollsLeft === 0 ? c.outOfRerolls : `${c.reroll} (${rerollsLeft})`}
+                {rerollsLeft === 0 ? c.outOfRerolls : rerollsLeft === null ? c.reroll : `${c.reroll} (${rerollsLeft})`}
               </button>
               <button onclick={onCancel} disabled={launched}>{c.cancel}</button>
             </div>

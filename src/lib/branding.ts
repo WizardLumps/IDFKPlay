@@ -21,6 +21,7 @@ export interface Branding {
     loading: string;
     rerolls: string[];
     outOfRerolls: string;
+    lockedPick: string;
     emptyResult: string;
     emptyLibrary: string;
     launchNow: string;

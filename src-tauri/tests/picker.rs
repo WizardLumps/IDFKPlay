@@ -1,5 +1,5 @@
 use idfkplay_lib::library::{LibraryGame, MetaState};
-use idfkplay_lib::picker::{self, Mode, Mood, PickRequest, PickRules, Rerolls, REROLLS_PER_SESSION};
+use idfkplay_lib::picker::{self, Mode, Mood, PickDecision, PickKind, PickRequest, PickRules, Session};
 use idfkplay_lib::source::Game;
 
 struct G {
@@ -206,14 +206,69 @@ fn reel_excludes_pick_and_fills_length() {
 }
 
 #[test]
-fn reroll_limit() {
-    let mut r = Rerolls::default();
-    assert_eq!(r.left(), REROLLS_PER_SESSION);
-    assert!(r.try_use());
-    assert!(r.try_use());
-    assert_eq!(r.left(), 0);
-    assert!(!r.try_use(), "third reroll denied");
-    assert_eq!(r.left(), 0);
+fn first_pick_is_free_then_rerolls_count_down_then_lock() {
+    let limit = Some(2);
+    let mut s = Session::default();
+    assert_eq!(s.decide(PickKind::Fresh, limit), PickDecision::Free);
+    s.shown(10);
+    assert_eq!(s.decide(PickKind::Reroll, limit), PickDecision::Charged);
+    s.shown(11);
+    assert_eq!(s.left(limit), Some(1));
+    assert_eq!(s.decide(PickKind::Reroll, limit), PickDecision::Charged);
+    s.shown(12);
+    assert_eq!(s.left(limit), Some(0));
+    // Out of rerolls: the same game comes back, and nothing more is spent.
+    assert_eq!(s.decide(PickKind::Reroll, limit), PickDecision::Locked(12));
+    assert_eq!(s.used(), 2);
+}
+
+#[test]
+fn cancel_then_pick_again_costs_a_reroll() {
+    // Cancel isn't a session event: the next Fresh pick after a reveal is charged.
+    let limit = Some(1);
+    let mut s = Session::default();
+    s.decide(PickKind::Fresh, limit);
+    s.shown(10);
+    assert_eq!(s.decide(PickKind::Fresh, limit), PickDecision::Charged);
+    s.shown(11);
+    assert_eq!(s.decide(PickKind::Fresh, limit), PickDecision::Locked(11), "no escaping via Cancel");
+}
+
+#[test]
+fn zero_rerolls_locks_immediately_and_replacements_are_free() {
+    let limit = Some(0);
+    let mut s = Session::default();
+    assert_eq!(s.decide(PickKind::Fresh, limit), PickDecision::Free);
+    s.shown(10);
+    assert_eq!(s.decide(PickKind::Reroll, limit), PickDecision::Locked(10));
+    assert_eq!(s.decide(PickKind::Replace, limit), PickDecision::Free, "blacklisting swaps for free");
+}
+
+#[test]
+fn unlimited_never_locks() {
+    let mut s = Session::default();
+    s.decide(PickKind::Fresh, None);
+    for id in 0..50 {
+        s.shown(id);
+        assert_eq!(s.decide(PickKind::Reroll, None), PickDecision::Charged);
+    }
+    assert_eq!(s.left(None), None);
+}
+
+#[test]
+fn launching_ends_the_cycle() {
+    let limit = Some(0);
+    let mut s = Session::default();
+    s.decide(PickKind::Fresh, limit);
+    s.shown(10);
+    s.launched();
+    assert_eq!(s.decide(PickKind::Fresh, limit), PickDecision::Free, "next pick after a launch is free");
+}
+
+#[test]
+fn pick_kind_deserializes() {
+    let k: PickKind = serde_json::from_str(r#""replace""#).unwrap();
+    assert_eq!(k, PickKind::Replace);
 }
 
 #[test]

@@ -18,8 +18,9 @@ Grab **`IDFKPlay_x.y.z_x64-setup.exe`** from the [latest release](../../releases
 - **Just Play** picks anything you own. **Something New** picks only games you've played less than 2 hours
   (adjustable).
 - A slot-machine spin through your cover art lands on the pick, the game's art fills the window, and it
-  **launches in 5 seconds** unless you stop it. Enter launches now, **R** rerolls (2 per session, and it gets
-  snarky), Esc cancels.
+  **launches in 5 seconds** unless you stop it. Enter launches now, **R** rerolls, Esc cancels.
+- **Rerolls are limited**: 2 per session by default (0–10 or unlimited in Settings), and it gets snarky.
+  Canceling doesn't dodge them: once they're used up, picking again brings the same game back.
 - **Filters** you can combine:
   - **Installed only**: remembered between launches.
   - **Moods**: Action, Adventure, Puzzle, RPG, Strategy, plus Multiplayer/Co-op, Controller and VR.

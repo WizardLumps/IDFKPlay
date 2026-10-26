@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 const SETTINGS_FILE: &str = "settings.json";
 const MIN_NEW_HOURS: f64 = 0.1;
 const MAX_NEW_HOURS: f64 = 1000.0;
+/// Highest finite reroll setting; above this the UI offers "unlimited".
+pub const MAX_REROLLS: u32 = 10;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +37,8 @@ pub struct Settings {
     pub hide_api_banner: bool,
     /// Never pick games hidden in Steam's library.
     pub skip_steam_hidden: bool,
+    /// Rerolls allowed per app session. `None` (JSON `null`) = unlimited.
+    pub rerolls_per_session: Option<u32>,
 }
 
 impl Default for Settings {
@@ -49,6 +53,7 @@ impl Default for Settings {
             blacklist: Vec::new(),
             hide_api_banner: false,
             skip_steam_hidden: true,
+            rerolls_per_session: Some(2),
         }
     }
 }
@@ -60,6 +65,7 @@ impl Settings {
             self.something_new_hours = Settings::default().something_new_hours;
         }
         self.something_new_hours = self.something_new_hours.clamp(MIN_NEW_HOURS, MAX_NEW_HOURS);
+        self.rerolls_per_session = self.rerolls_per_session.map(|n| n.min(MAX_REROLLS));
         let blank = |s: &Option<String>| s.as_deref().is_none_or(|v| v.trim().is_empty());
         if blank(&self.steam_path) {
             self.steam_path = None;
@@ -126,6 +132,15 @@ mod tests {
         assert_eq!(s.something_new_hours, 2.0);
         assert_eq!(s.after_launch, AfterLaunch::Close);
         assert_eq!(s.blacklist, [3, 5]);
+        assert_eq!(s.rerolls_per_session, Some(2), "missing = default 2");
+    }
+
+    #[test]
+    fn rerolls_null_means_unlimited_and_big_values_clamp() {
+        let s: Settings = serde_json::from_str(r#"{"rerollsPerSession":null}"#).unwrap();
+        assert_eq!(s.rerolls_per_session, None);
+        let s: Settings = serde_json::from_str(r#"{"rerollsPerSession":500}"#).unwrap();
+        assert_eq!(s.normalized().rerolls_per_session, Some(MAX_REROLLS));
     }
 
     #[test]

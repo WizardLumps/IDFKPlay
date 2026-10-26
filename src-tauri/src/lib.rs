@@ -12,7 +12,7 @@ pub mod vdf;
 
 use library::{ApiStatus, LibraryGame, LibraryView, RawLibrary};
 use metadata::{MetaStore, Progress};
-use picker::{PickRequest, PickRules, Rerolls};
+use picker::{PickDecision, PickKind, PickRequest, PickRules, Session};
 use serde::{Deserialize, Serialize};
 use settings::{AfterLaunch, Settings};
 use std::path::{Path, PathBuf};
@@ -31,7 +31,8 @@ struct AppState {
     /// Last scan; views are rebuilt from it as metadata arrives.
     library: Mutex<Option<RawLibrary>>,
     meta: Arc<MetaStore>,
-    rerolls: Mutex<Rerolls>,
+    /// Reroll budget and the current pick for this app session.
+    session: Mutex<Session>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -151,9 +152,14 @@ struct PickOutcome {
     reel: Vec<ReelItem>,
     /// How many games matched (before excluding already-shown ones).
     eligible: usize,
-    rerolls_left: u32,
-    /// A reroll was asked for but none are left; `game` is `None`.
-    reroll_denied: bool,
+    /// `None` = unlimited.
+    rerolls_left: Option<u32>,
+    /// Rerolls spent this session (drives the escalating snark).
+    rerolls_used: u32,
+    /// This pick spent a reroll.
+    charged: bool,
+    /// Out of rerolls: `game` is the same game as before.
+    locked: bool,
 }
 
 #[tauri::command]
@@ -161,19 +167,9 @@ async fn pick_game(
     app: AppHandle,
     state: State<'_, AppState>,
     mut request: PickRequest,
-    reroll: bool,
+    kind: PickKind,
 ) -> Result<PickOutcome, String> {
     let raw = current_library(app, &state, false).await?;
-    if reroll && !lock(&state.rerolls).try_use() {
-        return Ok(PickOutcome {
-            game: None,
-            art: None,
-            reel: Vec::new(),
-            eligible: 0,
-            rerolls_left: 0,
-            reroll_denied: true,
-        });
-    }
     // Without owned games, uninstalled ones aren't known, so the toggle is forced on.
     if !raw.api.has_owned() {
         request.installed_only = true;
@@ -188,7 +184,28 @@ async fn pick_game(
         hidden: if settings.skip_steam_hidden { &raw.collections.hidden } else { &[] },
     };
     let pool = picker::eligible(&view.games, &request, &rules);
-    let game = picker::choose(&pool, &request.exclude, picker::random_u64()).cloned();
+    let limit = settings.rerolls_per_session;
+
+    // Nothing matches: say so without spending a reroll.
+    let (game, charged, locked) = if pool.is_empty() {
+        (None, false, false)
+    } else {
+        let mut session = lock(&state.session);
+        let decision = session.decide(kind, limit);
+        // A locked game that's gone since (e.g. blacklisted) falls back to a normal pick.
+        let locked_game = match decision {
+            PickDecision::Locked(id) => view.games.iter().find(|g| g.game.app_id == id && !settings.blacklist.contains(&id)),
+            _ => None,
+        };
+        let (game, locked) = match locked_game {
+            Some(g) => (Some(g.clone()), true),
+            None => (picker::choose(&pool, &request.exclude, picker::random_u64()).cloned(), false),
+        };
+        if let Some(g) = &game {
+            session.shown(g.game.app_id);
+        }
+        (game, decision == PickDecision::Charged, locked)
+    };
 
     let steam_path = PathBuf::from(&raw.info.steam_path);
     let art = game.as_ref().map(|g| steam::art::game_art(Some(&steam_path), g.game.app_id));
@@ -208,8 +225,10 @@ async fn pick_game(
         art,
         reel,
         eligible: pool.len(),
-        rerolls_left: lock(&state.rerolls).left(),
-        reroll_denied: false,
+        rerolls_left: lock(&state.session).left(limit),
+        rerolls_used: lock(&state.session).used(),
+        charged,
+        locked,
     })
 }
 
@@ -287,6 +306,8 @@ async fn launch_game(app: AppHandle, state: State<'_, AppState>, app_id: u32) ->
     app.opener()
         .open_url(&url, None::<&str>)
         .map_err(|e| format!("Couldn't hand the game to Steam ({e}). Is Steam installed?"))?;
+    // The cycle is done: the next pick is a fresh, free one.
+    lock(&state.session).launched();
 
     let closing = state.settings().after_launch == AfterLaunch::Close;
     if closing {
@@ -367,9 +388,10 @@ fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<Setti
     store_settings(&state, settings)
 }
 
+/// Rerolls left this session under the current setting (`None` = unlimited).
 #[tauri::command]
-fn rerolls_left(state: State<'_, AppState>) -> u32 {
-    lock(&state.rerolls).left()
+fn rerolls_left(state: State<'_, AppState>) -> Option<u32> {
+    lock(&state.session).left(state.settings().rerolls_per_session)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -388,7 +410,7 @@ pub fn run() {
                 settings: Mutex::new(settings::load(&config_dir)),
                 meta: Arc::new(MetaStore::load(&config_dir)),
                 library: Mutex::new(None),
-                rerolls: Mutex::new(Rerolls::default()),
+                session: Mutex::new(Session::default()),
                 http,
                 config_dir,
             });

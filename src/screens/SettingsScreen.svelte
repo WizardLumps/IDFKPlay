@@ -1,6 +1,6 @@
 <script lang="ts">
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { api, API_KEY_URL } from "../lib/api";
+  import { api, API_KEY_URL, MAX_REROLLS } from "../lib/api";
   import { branding } from "../lib/branding";
   import { app, loadLibrary, updateSettings } from "../lib/state.svelte";
 
@@ -16,6 +16,19 @@
   let newLibrary = $state("");
   let keyDraft = $state("");
   let hoursDraft = $state(String(app.settings?.somethingNewHours ?? 2));
+
+  // Reroll slider: 0..MAX_REROLLS, and one step past the end means unlimited (saved as null).
+  let rerollSlider = $state(
+    app.settings?.rerollsPerSession === null ? MAX_REROLLS + 1 : (app.settings?.rerollsPerSession ?? 2),
+  );
+  const rerollLabel = $derived(
+    rerollSlider > MAX_REROLLS ? "Unlimited" : `${rerollSlider} ${rerollSlider === 1 ? "reroll" : "rerolls"}`,
+  );
+
+  function saveRerolls() {
+    const n = Number(rerollSlider);
+    updateSettings({ rerollsPerSession: n > MAX_REROLLS ? null : n });
+  }
 
   // Per-section feedback.
   let note = $state<Record<string, { text: string; bad?: boolean }>>({});
@@ -234,6 +247,33 @@
       {#if note.new?.text}<p class="note" class:bad={note.new.bad}>{note.new.text}</p>{/if}
     </div>
 
+    <!-- Rerolls -->
+    <div class="card">
+      <h3>Rerolls</h3>
+      <p class="dim">
+        How many times per session you can ask for a different game. Once they're used up, canceling and picking
+        again brings the same game back. Launching a game resets the cycle.
+      </p>
+      <div class="slider">
+        <input
+          type="range"
+          min="0"
+          max={MAX_REROLLS + 1}
+          step="1"
+          bind:value={rerollSlider}
+          onchange={saveRerolls}
+          aria-label="Rerolls per session"
+          aria-valuetext={rerollLabel}
+        />
+        <span class="slider-value">{rerollLabel}</span>
+      </div>
+      <div class="ticks dim">
+        <span style="left: 0%">0</span>
+        <span style="left: {(MAX_REROLLS / (MAX_REROLLS + 1)) * 100}%">{MAX_REROLLS}</span>
+        <span style="left: 100%">∞</span>
+      </div>
+    </div>
+
     <!-- After launch -->
     <div class="card">
       <h3>After launching a game</h3>
@@ -435,6 +475,44 @@
     text-decoration: underline;
     text-underline-offset: 3px;
     font-size: inherit;
+  }
+
+  .slider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .slider input {
+    flex: 1;
+    padding: 0;
+    border: none;
+    background: none;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  .slider-value {
+    flex: 0 0 96px;
+    text-align: right;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  /* Labels under the slider track, each centred on its step. The inset keeps them under
+     the thumb's travel (the track minus half a thumb at each end); the right margin skips
+     the value label beside the slider. */
+  .ticks {
+    position: relative;
+    height: 16px;
+    margin: -4px calc(112px + 8px) 0 8px;
+    font-size: 12px;
+  }
+
+  .ticks span {
+    position: absolute;
+    transform: translateX(-50%);
   }
 
   .check {

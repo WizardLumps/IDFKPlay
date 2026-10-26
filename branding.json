@@ -17,6 +17,7 @@
     "loading": "Looking through your Steam library…",
     "rerolls": ["Fine.", "Reroll? Seriously?"],
     "outOfRerolls": "No. You're playing this.",
+    "lockedPick": "Nice try. You're still playing this.",
     "emptyResult": "Nothing matches. Loosen a filter.",
     "emptyLibrary": "No games found. Check your Steam folder in Settings.",
     "launchNow": "Launch now",

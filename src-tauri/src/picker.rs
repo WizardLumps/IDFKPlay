@@ -5,8 +5,6 @@ use crate::library::{LibraryGame, MetaState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const REROLLS_PER_SESSION: u32 = 2;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
@@ -148,31 +146,72 @@ pub fn reel<'a>(pool: &[&'a LibraryGame], pick: u32, n: usize, seed: u64) -> Vec
     others.iter().copied().cycle().take(n).collect()
 }
 
-/// Reroll budget for one app session.
-#[derive(Debug, Clone)]
-pub struct Rerolls {
+/// How a pick was asked for.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum PickKind {
+    /// Just Play / Something New from the main screen.
+    Fresh,
+    /// The Reroll button.
+    Reroll,
+    /// Replacement after "Never show this again": always free.
+    Replace,
+}
+
+/// What the session lets this pick do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PickDecision {
+    /// No reroll spent (first pick, or a replacement).
+    Free,
+    /// One reroll spent.
+    Charged,
+    /// Out of rerolls: show this game again instead of picking.
+    Locked(u32),
+}
+
+/// Reroll budget and the current pick for one app session.
+///
+/// Once a game has been revealed, any new pick (Reroll, or Cancel then Just Play)
+/// costs a reroll; with none left, the same game comes back. Launching a game
+/// ends the cycle so the next pick is free again.
+#[derive(Debug, Clone, Default)]
+pub struct Session {
     used: u32,
-    limit: u32,
+    current: Option<u32>,
 }
 
-impl Default for Rerolls {
-    fn default() -> Self {
-        Rerolls { used: 0, limit: REROLLS_PER_SESSION }
-    }
-}
-
-impl Rerolls {
-    pub fn left(&self) -> u32 {
-        self.limit.saturating_sub(self.used)
+impl Session {
+    /// Rerolls left under `limit` (`None` = unlimited, which returns `None`).
+    pub fn left(&self, limit: Option<u32>) -> Option<u32> {
+        limit.map(|l| l.saturating_sub(self.used))
     }
 
-    /// Uses one reroll. Returns false (and changes nothing) when none are left.
-    pub fn try_use(&mut self) -> bool {
-        if self.left() == 0 {
-            return false;
+    pub fn used(&self) -> u32 {
+        self.used
+    }
+
+    pub fn decide(&mut self, kind: PickKind, limit: Option<u32>) -> PickDecision {
+        let Some(current) = self.current else {
+            return PickDecision::Free;
+        };
+        if kind == PickKind::Replace {
+            return PickDecision::Free;
+        }
+        if self.left(limit) == Some(0) {
+            return PickDecision::Locked(current);
         }
         self.used += 1;
-        true
+        PickDecision::Charged
+    }
+
+    /// Records the game now on screen.
+    pub fn shown(&mut self, app_id: u32) {
+        self.current = Some(app_id);
+    }
+
+    /// A game was launched: the next pick starts fresh (and is free).
+    pub fn launched(&mut self) {
+        self.current = None;
     }
 }
 
