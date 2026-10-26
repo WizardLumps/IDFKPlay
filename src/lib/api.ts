@@ -34,6 +34,11 @@ export interface PickRequest {
   collections: string[];
 }
 
+export interface BackdropItem {
+  appId: number;
+  portrait: ArtSource[];
+}
+
 export interface ReelItem {
   appId: number;
   name: string;
@@ -162,6 +167,7 @@ export const api = {
   getLibrary: (refresh = false) => call<LibraryView>("get_library", { refresh }),
   pickGame: (request: PickRequest, reroll: boolean) => call<PickOutcome>("pick_game", { request, reroll }),
   getArt: (appId: number) => call<GameArt>("get_art", { appId }),
+  getBackdrop: (count: number) => call<BackdropItem[]>("get_backdrop", { count }),
   launchGame: (appId: number) => call<{ closing: boolean }>("launch_game", { appId }),
   setBlacklisted: (appId: number, blacklisted: boolean) =>
     call<Settings>("set_blacklisted", { appId, blacklisted }),

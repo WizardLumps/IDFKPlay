@@ -1,5 +1,5 @@
 // App-wide state shared by the main and settings screens.
-import { api, type ApiKeyStatus, type LibraryView, type MetaProgress, type Settings } from "./api";
+import { api, type ApiKeyStatus, type BackdropItem, type LibraryView, type MetaProgress, type Settings } from "./api";
 
 export const app = $state({
   settings: null as Settings | null,
@@ -9,7 +9,23 @@ export const app = $state({
   /** Why the library couldn't load (e.g. Steam not found). */
   libraryError: "",
   loading: false,
+  /** Home-screen backdrop covers; chosen once per app session. */
+  backdrop: null as BackdropItem[] | null,
 });
+
+let backdropRequested = false;
+
+/** Fetches the backdrop covers once the library is available (once per session). */
+export async function loadBackdrop(count: number) {
+  if (backdropRequested || !app.view) return;
+  backdropRequested = true;
+  try {
+    app.backdrop = await api.getBackdrop(count);
+  } catch {
+    // Purely decorative: no backdrop is fine.
+    app.backdrop = [];
+  }
+}
 
 /** True when the Web API supplied owned games, so uninstalled games are known. */
 export function hasOwnedGames(view: LibraryView | null): boolean {

@@ -1,3 +1,4 @@
+pub mod backdrop;
 pub mod error;
 pub mod jsonfile;
 pub mod library;
@@ -212,6 +213,49 @@ async fn pick_game(
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackdropItem {
+    app_id: u32,
+    portrait: Vec<steam::art::ArtSource>,
+}
+
+/// Covers for the home-screen backdrop: a fresh random mix, favorites and played games
+/// first, locally cached art preferred. Skips blacklisted and Steam-hidden games.
+#[tauri::command]
+async fn get_backdrop(app: AppHandle, state: State<'_, AppState>, count: usize) -> Result<Vec<BackdropItem>, String> {
+    let raw = current_library(app, &state, false).await?;
+    let settings = state.settings();
+    let view = library::build_view(&raw, &state.meta.snapshot());
+    let steam_path = PathBuf::from(&raw.info.steam_path);
+    let cache = steam::art::library_cache_dir(&steam_path);
+    let favorites: Vec<u32> = raw
+        .collections
+        .list
+        .iter()
+        .find(|c| c.id == steam::collections::FAVORITES_ID)
+        .map(|c| c.app_ids.clone())
+        .unwrap_or_default();
+
+    let candidates: Vec<backdrop::Candidate> = view
+        .games
+        .iter()
+        .map(|g| &g.game)
+        .filter(|g| !settings.blacklist.contains(&g.app_id) && !raw.collections.hidden.contains(&g.app_id))
+        .map(|g| backdrop::Candidate {
+            app_id: g.app_id,
+            has_local_art: steam::art::find_local(&cache, g.app_id, steam::art::ArtKind::Portrait).is_some(),
+            favorite: favorites.contains(&g.app_id),
+            played: g.playtime_minutes > 0,
+        })
+        .collect();
+
+    Ok(backdrop::choose(&candidates, count.min(60), backdrop::seed())
+        .into_iter()
+        .map(|id| BackdropItem { app_id: id, portrait: steam::art::game_art(Some(&steam_path), id).portrait })
+        .collect())
+}
+
 /// Art candidates for a game, local cache first then CDN.
 #[tauri::command]
 fn get_art(state: State<'_, AppState>, app_id: u32) -> steam::art::GameArt {
@@ -354,6 +398,7 @@ pub fn run() {
             get_library,
             pick_game,
             get_art,
+            get_backdrop,
             launch_game,
             set_blacklisted,
             rerolls_left,

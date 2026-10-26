@@ -2,6 +2,7 @@
   import { api, type GameArt, type LibraryGame, type Mode, type Mood, type PickOutcome, type ReelItem } from "../lib/api";
   import { branding } from "../lib/branding";
   import Reveal from "../lib/Reveal.svelte";
+  import Backdrop from "../lib/Backdrop.svelte";
   import { app, hasOwnedGames, installedOnly, updateSettings } from "../lib/state.svelte";
 
   interface Props {
@@ -173,6 +174,8 @@
 </script>
 
 <section class="main">
+  <Backdrop paused={reveal !== null} />
+
   <div class="intro">
     <h1>{branding.appName}</h1>
     <p class="tagline">{branding.tagline}</p>
@@ -286,6 +289,16 @@
     justify-content: center;
     gap: 28px;
     padding: 40px 48px;
+  }
+
+  /* Content sits above the backdrop (which is absolutely positioned at z-index 0). */
+  .intro,
+  .banner,
+  .actions,
+  .filters,
+  .status {
+    position: relative;
+    z-index: 1;
   }
 
   .intro {
