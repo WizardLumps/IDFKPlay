@@ -1,12 +1,10 @@
 # Builds the Windows installer and attaches it to a draft GitHub Release.
-# Trigger: push a tag like v0.1.0 (git tag v0.1.0 && git push origin v0.1.0),
-# or run it by hand from the Actions tab.
+# Trigger: push a tag like v0.1.0 (git tag v0.1.0 && git push origin v0.1.0).
 name: Release
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,10 +12,13 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: npm
@@ -30,16 +31,49 @@ jobs:
 
       - run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseName: "IDFKPlay ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}"
-          releaseBody: |
-            Download **IDFKPlay_*_x64-setup.exe** below and run it. No admin rights needed.
+      - name: Build installer
+        run: npm run tauri build
 
-            Windows may show "Windows protected your PC" because the installer isn't code-signed:
-            click **More info → Run anyway**.
-          releaseDraft: true
-          prerelease: false
+      - name: Find installer
+        id: find
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $exe) { throw "No installer was produced in src-tauri/target/release/bundle/nsis" }
+          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "name=$($exe.Name)" >> $env:GITHUB_OUTPUT
+
+      # Also kept on the run itself, so the build is downloadable even if the release step fails.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find.outputs.name }}
+          path: ${{ steps.find.outputs.path }}
+          if-no-files-found: error
+
+      - name: Attach to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          EXE: ${{ steps.find.outputs.path }}
+        run: |
+          $notes = @"
+          Download **$(Split-Path $env:EXE -Leaf)** below and run it. No admin rights needed.
+
+          Windows may show "Windows protected your PC" because the installer isn't code-signed:
+          click **More info → Run anyway**.
+          "@
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $env:EXE --clobber
+          } else {
+            gh release create $env:TAG $env:EXE --draft --title "IDFKPlay $env:TAG" --notes $notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't attach the installer to release $env:TAG" }
+
+      - name: Summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $r = gh release view $env:TAG --json name,isDraft,assets | ConvertFrom-Json
+          "### $($r.name) (draft: $($r.isDraft))" >> $env:GITHUB_STEP_SUMMARY
+          foreach ($a in $r.assets) { "- $($a.name) ($([math]::Round($a.size / 1MB, 2)) MB)" >> $env:GITHUB_STEP_SUMMARY }
