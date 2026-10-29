@@ -326,6 +326,7 @@
         {/if}
         {#if app.progress?.running}
           {branding.copy.learning} {app.progress.done}/{app.progress.total}
+          {#if app.learningSlow}{branding.copy.learningSlow}{/if}
         {:else if app.progress?.error}
           {app.progress.error}
         {/if}

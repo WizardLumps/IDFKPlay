@@ -49,8 +49,7 @@ The key is stored in Windows Credential Manager on your PC and is only ever sent
 ## Privacy
 
 Everything stays on your PC. IDFKPlay reads your local Steam files and talks only to Steam
-(`api.steampowered.com`, `store.steampowered.com`, Steam's image CDN) and SteamSpy (`steamspy.com`) for game
-tags. There's no account, telemetry or analytics.
+(`api.steampowered.com` and Steam's image CDN). There's no account, telemetry or analytics.
 
 Settings and caches live in `%APPDATA%\IDFKPlay\`:
 
@@ -58,7 +57,8 @@ Settings and caches live in `%APPDATA%\IDFKPlay\`:
 |---|---|
 | `settings.json` | Settings, filters you saved, blacklist |
 | `owned-games.json` | Last list of owned games from Steam (used when offline) |
-| `metadata-cache.json` | Genres, categories and tags per game |
+| `metadata-cache.json` | Type, categories and tags per game |
+| `tag-names.json` | Steam's tag names (refreshed monthly) |
 
 Delete the folder to reset everything.
 
@@ -111,7 +111,8 @@ publish.
 |---|---|
 | Steam install, libraries, accounts, local playtime | `src-tauri/src/steam/` (registry, `libraryfolders.vdf`, `appmanifest_*.acf`, `loginusers.vdf`, `localconfig.vdf`) |
 | Owned games incl. uninstalled | Steam Web API `IPlayerService/GetOwnedGames` |
-| Genres, categories, tags | Steam store `appdetails` + SteamSpy, fetched in the background (~1 request / 1.5 s) and cached |
+| Type, categories, tags | Steam's batch store service `IStoreBrowseService/GetItems` (100 games per request) + `IStoreService/GetTagList`, fetched in the background and cached |
+| New games | Rescanned at launch and when the window regains focus (at most once a minute); new games are learned first |
 | Collections, Favorites, Hidden | `userdata\<id>\config\cloudstorage\cloud-storage-namespace-1.json` |
 | Cover / hero art | Steam's local `appcache\librarycache`, then Steam's CDN |
 | Picking, filters, rerolls | `src-tauri/src/picker.rs` |

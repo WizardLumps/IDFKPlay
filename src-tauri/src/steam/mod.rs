@@ -5,6 +5,7 @@ pub mod library;
 pub mod locate;
 pub mod playtime;
 pub mod store;
+pub mod storebrowse;
 pub mod webapi;
 
 use crate::error::AppError;

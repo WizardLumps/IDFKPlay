@@ -1,7 +1,9 @@
 use idfkplay_lib::library::{self, ApiStatus, MetaState, RawLibrary};
 use idfkplay_lib::source::Game;
 use idfkplay_lib::steam::locate::PathSource;
-use idfkplay_lib::steam::store::{parse_appdetails, parse_steamspy_tags, AppMeta, MetaStatus, StoreResult};
+use idfkplay_lib::metadata::to_meta;
+use idfkplay_lib::steam::store::{AppMeta, MetaStatus};
+use idfkplay_lib::steam::storebrowse::{self, parse_items, parse_tag_list};
 use idfkplay_lib::steam::webapi::{parse_owned_games, WebApiError};
 use idfkplay_lib::steam::SteamInfo;
 use std::collections::HashMap;
@@ -12,37 +14,86 @@ fn fixture(name: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(name)).unwrap()
 }
 
-#[test]
-fn appdetails_game() {
-    let r = parse_appdetails(620, &fixture("appdetails_620.json")).unwrap();
-    let StoreResult::Found { app_type, genres, categories } = r else { panic!("expected Found, got {r:?}") };
-    assert_eq!(app_type.as_deref(), Some("game"));
-    assert_eq!(genres, ["Action", "Adventure"]);
-    assert!(categories.contains(&"Online Co-op".to_string()));
-    assert!(categories.contains(&"Full controller support".to_string()));
-    assert_eq!(categories.iter().filter(|c| *c == "Steam Workshop").count(), 1, "duplicates removed");
+fn items() -> Vec<storebrowse::Item> {
+    parse_items(&fixture("storebrowse_items.json")).unwrap()
 }
 
 #[test]
-fn appdetails_dlc_type_lowercased() {
-    let r = parse_appdetails(323180, &fixture("appdetails_dlc.json")).unwrap();
-    assert!(matches!(r, StoreResult::Found { app_type: Some(t), genres, .. } if t == "dlc" && genres.is_empty()));
+fn batch_items_types_and_not_found() {
+    let items = items();
+    assert_eq!(items.len(), 6);
+    let by_id: HashMap<u32, &storebrowse::Item> = items.iter().map(|i| (i.app_id, i)).collect();
+    assert_eq!(by_id[&620].app_type, Some("game"));
+    assert_eq!(by_id[&323180].app_type, Some("music"), "Portal 2 Soundtrack");
+    // Not-found entries report appid 0; the requested id is kept from `id`.
+    assert!(!by_id[&228980].found);
 }
 
 #[test]
-fn appdetails_failure_and_throttle() {
-    assert_eq!(parse_appdetails(42, r#"{"42":{"success":false}}"#).unwrap(), StoreResult::NotFound);
-    assert_eq!(parse_appdetails(42, r#"{}"#).unwrap(), StoreResult::NotFound);
-    assert_eq!(parse_appdetails(42, "null").unwrap(), StoreResult::Throttled);
-    assert!(parse_appdetails(42, "<html>").is_err());
+fn batch_categories_map_to_store_names() {
+    let items = items();
+    let get = |id| items.iter().find(|i| i.app_id == id).unwrap();
+    let portal = get(620);
+    assert!(portal.categories.contains(&"Online Co-op".to_string()));
+    assert!(portal.categories.contains(&"Full controller support".to_string()));
+    // Categories the picker doesn't use (achievements, cloud…) are dropped.
+    assert!(!portal.categories.iter().any(|c| c.contains("Achievements")));
+    assert!(get(667970).categories.contains(&"PvP".to_string()), "VTOL VR");
+    let mut hades = get(1145360).categories.clone();
+    hades.sort();
+    assert_eq!(hades, ["Full controller support", "Single-player"]);
 }
 
 #[test]
-fn steamspy_tags_sorted_by_votes() {
-    let tags = parse_steamspy_tags(&fixture("steamspy_620.json")).unwrap();
-    assert_eq!(tags, ["Puzzle", "Co-op", "First-Person", "Sci-fi"]);
-    // SteamSpy sends `[]` instead of `{}` when an app has no tags.
-    assert!(parse_steamspy_tags(r#"{"appid":1,"tags":[]}"#).unwrap().is_empty());
+fn batch_tags_are_ordered_by_votes() {
+    let portal = items().into_iter().find(|i| i.app_id == 620).unwrap();
+    assert_eq!(portal.tag_ids.len(), 20);
+    assert_eq!(portal.tag_ids[0], 4182, "highest weight first (Singleplayer)");
+}
+
+#[test]
+fn tag_list_names_and_unknown_tags() {
+    let names = parse_tag_list(&fixture("tag_list.json")).unwrap();
+    let portal = items().into_iter().find(|i| i.app_id == 620).unwrap();
+    let (tags, unknown) = storebrowse::tag_names(&portal.tag_ids, &names);
+    assert_eq!(&tags[..3], ["Singleplayer", "Platformer", "Puzzle"]);
+    // The fixture leaves out tag 19 ("Action") to cover tags Steam added after we cached the list.
+    assert_eq!(unknown, 1);
+    assert!(parse_tag_list("{}").is_err());
+}
+
+#[test]
+fn to_meta_marks_incomplete_tags_for_retry() {
+    let names = parse_tag_list(&fixture("tag_list.json")).unwrap();
+    let items = items();
+    let portal = to_meta(items.iter().find(|i| i.app_id == 620).unwrap(), &names, 5);
+    assert_eq!(portal.status, MetaStatus::Known);
+    assert!(portal.is_game());
+    assert!(!portal.tags_fetched, "one tag couldn't be named yet");
+    let hades = to_meta(items.iter().find(|i| i.app_id == 1145360).unwrap(), &names, 5);
+    assert!(!hades.tags.is_empty());
+    assert!(hades.categories.contains(&"Full controller support".to_string()));
+    let soundtrack = to_meta(items.iter().find(|i| i.app_id == 323180).unwrap(), &names, 5);
+    assert!(!soundtrack.is_game());
+    let missing = to_meta(items.iter().find(|i| i.app_id == 228980).unwrap(), &names, 5);
+    assert_eq!(missing.status, MetaStatus::Unknown);
+    assert!(missing.tags_fetched, "nothing more to fetch");
+}
+
+#[test]
+fn batch_parse_rejects_garbage() {
+    assert!(parse_items("<html>").is_err());
+    assert!(parse_items("{}").is_err());
+    assert!(parse_items(r#"{"response":{"store_items":[]}}"#).unwrap().is_empty());
+}
+
+#[test]
+fn items_url_encodes_ids_and_context() {
+    let url = storebrowse::items_url(&[620, 400]).unwrap();
+    let input = url.query_pairs().find(|(k, _)| k == "input_json").unwrap().1.to_string();
+    let v: serde_json::Value = serde_json::from_str(&input).unwrap();
+    assert_eq!(v["ids"][1]["appid"], 400);
+    assert_eq!(v["context"]["language"], "english");
 }
 
 #[test]
@@ -162,17 +213,18 @@ fn view_hides_non_games_and_tracks_meta_state() {
 }
 
 #[test]
-fn ids_needing_meta_skips_cached_and_excluded() {
+fn ids_needing_meta_skips_cached_and_excluded_and_puts_new_games_first() {
     let local = vec![
+        // "A…" sorts first by name, but it's a retry, so it goes after the new games.
+        local_game(889, "A Game With Incomplete Tags", true, 0),
         local_game(620, "Portal 2", true, 0),
         local_game(228980, "Steamworks Common Redistributables", true, 0),
-        local_game(888, "Not Fetched Yet", true, 0),
-        local_game(889, "Tags Failed", true, 0),
+        local_game(888, "Brand New Game", true, 0),
+        local_game(887, "Zebra New Game", true, 0),
     ];
     let mut cache = HashMap::new();
     cache.insert(620, meta("game"));
     cache.insert(889, AppMeta { tags_fetched: false, ..meta("game") });
-    let mut ids = library::ids_needing_meta(&raw(local, None), &cache);
-    ids.sort();
-    assert_eq!(ids, [888, 889]);
+    let ids = library::ids_needing_meta(&raw(local, None), &cache);
+    assert_eq!(ids, [888, 887, 889]);
 }

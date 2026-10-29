@@ -14,6 +14,7 @@
     "apiBannerAction": "Open Settings",
     "dismiss": "Dismiss",
     "learning": "Learning your library…",
+    "learningSlow": "Big library? This can take a few minutes. Keep IDFKPlay open until it finishes.",
     "loading": "Looking through your Steam library…",
     "rerolls": ["Fine.", "Reroll? Seriously?"],
     "outOfRerolls": "No. You're playing this.",

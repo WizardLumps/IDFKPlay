@@ -18,6 +18,7 @@ export interface Branding {
     apiBannerAction: string;
     dismiss: string;
     learning: string;
+    learningSlow: string;
     loading: string;
     rerolls: string[];
     outOfRerolls: string;

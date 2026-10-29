@@ -262,6 +262,8 @@
       {c.loading}
     {:else if app.progress?.running}
       {c.learning} {app.progress.done}/{app.progress.total}
+      {#if app.progress.note}<br /><span class="dim">{app.progress.note}</span>
+      {:else if app.learningSlow}<br /><span class="dim">{c.learningSlow}</span>{/if}
     {:else if forcedInstalled && app.view}
       <span class="dim">{c.installedOnlyForced}</span>
     {/if}
@@ -581,6 +583,8 @@
     margin: 0;
     min-height: 1.5em;
     font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
     color: var(--text-dim);
   }
 

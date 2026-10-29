@@ -225,9 +225,10 @@ pub fn build_view(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> LibraryView
     }
 }
 
-/// App IDs whose metadata should be fetched: not cached yet, or a game whose SteamSpy tags failed.
+/// App IDs whose metadata should be fetched: games never seen before first (so new
+/// purchases and installs are filterable right away), then games whose tags were incomplete.
 pub fn ids_needing_meta(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> Vec<u32> {
-    merge(&raw.local, raw.owned.as_deref())
+    let (mut new, retry): (Vec<u32>, Vec<u32>) = merge(&raw.local, raw.owned.as_deref())
         .into_iter()
         .filter(|g| excluded_by_name(g.app_id, &g.name).is_none())
         .filter(|g| match meta.get(&g.app_id) {
@@ -235,5 +236,7 @@ pub fn ids_needing_meta(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> Vec<u
             Some(m) => m.status == MetaStatus::Known && m.is_game() && !m.tags_fetched,
         })
         .map(|g| g.app_id)
-        .collect()
+        .partition(|id| !meta.contains_key(id));
+    new.extend(retry);
+    new
 }
