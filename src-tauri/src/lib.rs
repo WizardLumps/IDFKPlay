@@ -7,6 +7,7 @@ pub mod picker;
 pub mod secrets;
 pub mod settings;
 pub mod source;
+pub mod usergames;
 pub mod steam;
 pub mod vdf;
 
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use settings::{AfterLaunch, Settings};
 use std::collections::HashMap;
 use steam::store::AppMeta;
+use usergames::{CustomGameInput, Launch, OverrideInput, UserGames};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use steam::webapi::{self, OwnedGame};
@@ -35,6 +37,8 @@ struct AppState {
     meta: Arc<MetaStore>,
     /// Reroll budget and the current pick for this app session.
     session: Mutex<Session>,
+    /// Games the user added and their edits to Steam games (also copied into each scan).
+    user: Mutex<UserGames>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -100,6 +104,7 @@ async fn scan_library(state: &AppState) -> Result<RawLibrary, String> {
         local: scan.games,
         owned,
         collections: scan.collections,
+        user: lock(&state.user).clone(),
         api,
         warnings: scan.warnings,
     })
@@ -179,7 +184,7 @@ async fn pick_game(
     let meta = state.meta.snapshot();
     let view = library::build_view(&raw, &meta);
     let settings = state.settings();
-    let members = library::collection_members(&raw.collections, &request.collections);
+    let members = library::collection_members(&raw.effective_collections(), &request.collections);
     let rules = PickRules {
         something_new_minutes: (settings.something_new_hours * 60.0).round() as u32,
         blacklist: &settings.blacklist,
@@ -218,7 +223,7 @@ async fn pick_game(
     };
 
     let steam_path = PathBuf::from(&raw.info.steam_path);
-    let art = game.as_ref().map(|g| art_for(&meta, &steam_path, g.game.app_id));
+    let art = game.as_ref().map(|g| art_for(&state.config_dir, &raw.user, &meta, Some(&steam_path), g.game.app_id));
     let reel = game
         .as_ref()
         .map(|g| picker::reel(&pool, g.game.app_id, REEL_LEN, picker::random_u64()))
@@ -227,7 +232,7 @@ async fn pick_game(
         .map(|g| ReelItem {
             app_id: g.game.app_id,
             name: g.game.name.clone(),
-            portrait: art_for(&meta, &steam_path, g.game.app_id).portrait,
+            portrait: art_for(&state.config_dir, &raw.user, &meta, Some(&steam_path), g.game.app_id).portrait,
         })
         .collect();
     Ok(PickOutcome {
@@ -260,7 +265,7 @@ async fn get_backdrop(app: AppHandle, state: State<'_, AppState>, count: usize) 
     let steam_path = PathBuf::from(&raw.info.steam_path);
     let cache = steam::art::library_cache_dir(&steam_path);
     let favorites: Vec<u32> = raw
-        .collections
+        .effective_collections()
         .list
         .iter()
         .find(|c| c.id == steam::collections::FAVORITES_ID)
@@ -274,7 +279,8 @@ async fn get_backdrop(app: AppHandle, state: State<'_, AppState>, count: usize) 
         .filter(|g| !settings.blacklist.contains(&g.app_id) && !raw.collections.hidden.contains(&g.app_id))
         .map(|g| backdrop::Candidate {
             app_id: g.app_id,
-            has_local_art: steam::art::find_local(&cache, g.app_id, steam::art::ArtKind::Portrait).is_some(),
+            has_local_art: raw.user.image(g.app_id).is_some()
+                || steam::art::find_local(&cache, g.app_id, steam::art::ArtKind::Portrait).is_some(),
             favorite: favorites.contains(&g.app_id),
             played: g.playtime_minutes > 0,
         })
@@ -282,22 +288,41 @@ async fn get_backdrop(app: AppHandle, state: State<'_, AppState>, count: usize) 
 
     Ok(backdrop::choose(&candidates, count.min(60), backdrop::seed())
         .into_iter()
-        .map(|id| BackdropItem { app_id: id, portrait: art_for(&meta, &steam_path, id).portrait })
+        .map(|id| BackdropItem {
+            app_id: id,
+            portrait: art_for(&state.config_dir, &raw.user, &meta, Some(&steam_path), id).portrait,
+        })
         .collect())
 }
 
-/// Art candidates for a game: local cache, the store's exact URLs, then the classic CDN.
-fn art_for(meta: &HashMap<u32, AppMeta>, steam_path: &Path, app_id: u32) -> steam::art::GameArt {
-    let assets = meta.get(&app_id).and_then(|m| m.assets.as_ref());
-    steam::art::game_art(Some(steam_path), app_id, assets)
+/// Art candidates for a game: the user's image first, then (for Steam games) the local
+/// cache, the store's exact URLs and the classic CDN.
+fn art_for(
+    config_dir: &Path,
+    user: &UserGames,
+    meta: &HashMap<u32, AppMeta>,
+    steam_path: Option<&Path>,
+    app_id: u32,
+) -> steam::art::GameArt {
+    let mut art = if usergames::is_custom(app_id) {
+        steam::art::GameArt { portrait: vec![], header: vec![], hero: vec![] }
+    } else {
+        let assets = meta.get(&app_id).and_then(|m| m.assets.as_ref());
+        steam::art::game_art(steam_path, app_id, assets)
+    };
+    if let Some(image) = user.image(app_id) {
+        let src = usergames::image_source(config_dir, image);
+        art.portrait.insert(0, src.clone());
+        art.header.insert(0, src);
+    }
+    art
 }
 
 #[tauri::command]
 fn get_art(state: State<'_, AppState>, app_id: u32) -> steam::art::GameArt {
     let steam_path = lock(&state.library).as_ref().map(|r| PathBuf::from(&r.info.steam_path));
-    let meta = state.meta.snapshot();
-    let assets = meta.get(&app_id).and_then(|m| m.assets.as_ref());
-    steam::art::game_art(steam_path.as_deref(), app_id, assets)
+    let user = lock(&state.user).clone();
+    art_for(&state.config_dir, &user, &state.meta.snapshot(), steam_path.as_deref(), app_id)
 }
 
 #[derive(Serialize)]
@@ -311,19 +336,24 @@ struct LaunchOutcome {
 #[tauri::command]
 async fn launch_game(app: AppHandle, state: State<'_, AppState>, app_id: u32) -> Result<LaunchOutcome, String> {
     let raw = current_library(app.clone(), &state, false).await?;
-    let installed = library::merge(&raw.local, raw.owned.as_deref())
-        .iter()
-        .find(|g| g.app_id == app_id)
-        .map(|g| g.installed)
-        .ok_or("That game isn't in your library anymore. Refresh and try again.")?;
-    let url = if installed {
-        format!("steam://rungameid/{app_id}")
+    if usergames::is_custom(app_id) {
+        let game = raw.user.custom(app_id).ok_or("That game was removed. Pick again.")?;
+        launch_custom(&app, &game.name, &game.launch)?;
     } else {
-        format!("steam://install/{app_id}")
-    };
-    app.opener()
-        .open_url(&url, None::<&str>)
-        .map_err(|e| format!("Couldn't hand the game to Steam ({e}). Is Steam installed?"))?;
+        let installed = library::merge(&raw.local, raw.owned.as_deref())
+            .iter()
+            .find(|g| g.app_id == app_id)
+            .map(|g| g.installed)
+            .ok_or("That game isn't in your library anymore. Refresh and try again.")?;
+        let url = if installed {
+            format!("steam://rungameid/{app_id}")
+        } else {
+            format!("steam://install/{app_id}")
+        };
+        app.opener()
+            .open_url(&url, None::<&str>)
+            .map_err(|e| format!("Couldn't hand the game to Steam ({e}). Is Steam installed?"))?;
+    }
     // The cycle is done: the next pick is a fresh, free one.
     lock(&state.session).launched();
 
@@ -337,6 +367,111 @@ async fn launch_game(app: AppHandle, state: State<'_, AppState>, app_id: u32) ->
         });
     }
     Ok(LaunchOutcome { closing })
+}
+
+/// Starts a custom game: a program (with optional raw arguments) or a launcher link.
+fn launch_custom(app: &AppHandle, name: &str, launch: &Launch) -> Result<(), String> {
+    match launch {
+        Launch::Link { url } => app
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| format!("Couldn't open {name}'s launch link ({e}). Is its launcher installed?")),
+        Launch::Program { path, args } => {
+            let program = Path::new(path);
+            if !program.exists() {
+                return Err(format!("Couldn't find {path}. Edit {name} in Settings → Games to fix it."));
+            }
+            let is_exe = program.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+            if !is_exe {
+                // Shortcuts (.lnk, .url) and scripts open the way Explorer would.
+                if !args.trim().is_empty() {
+                    return Err(format!("Arguments only work with .exe programs. Edit {name} in Settings → Games."));
+                }
+                return app
+                    .opener()
+                    .open_path(path, None::<&str>)
+                    .map_err(|e| format!("Couldn't open {path}: {e}"));
+            }
+            use std::os::windows::process::CommandExt;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            let mut cmd = std::process::Command::new(program);
+            // Passed through untouched so quoting like --exec="launch WoW" survives.
+            if !args.trim().is_empty() {
+                cmd.raw_arg(args.trim());
+            }
+            if let Some(dir) = program.parent() {
+                cmd.current_dir(dir);
+            }
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("Couldn't start {name}: {e}"))
+        }
+    }
+}
+
+/// Applies an edit to the user's games: saves the file and updates the in-memory copies.
+/// Takes one lock at a time (never two at once).
+fn edit_user_games(state: &AppState, f: impl FnOnce(&mut UserGames) -> Result<(), String>) -> Result<UserGames, String> {
+    let mut user = lock(&state.user).clone();
+    f(&mut user)?;
+    user.save(&state.config_dir)
+        .map_err(|e| format!("Couldn't save your games to {}: {e}", state.config_dir.display()))?;
+    *lock(&state.user) = user.clone();
+    if let Some(raw) = lock(&state.library).as_mut() {
+        raw.user = user.clone();
+    }
+    Ok(user)
+}
+
+#[tauri::command]
+fn get_user_games(state: State<'_, AppState>) -> UserGames {
+    lock(&state.user).clone()
+}
+
+/// Adds (no `id`) or updates a custom game.
+#[tauri::command]
+fn save_custom_game(state: State<'_, AppState>, game: CustomGameInput) -> Result<UserGames, String> {
+    edit_user_games(&state, |u| u.save_custom(&state.config_dir, game).map(|_| ()))
+}
+
+#[tauri::command]
+fn delete_custom_game(state: State<'_, AppState>, app_id: u32) -> Result<UserGames, String> {
+    edit_user_games(&state, |u| {
+        u.delete_custom(&state.config_dir, app_id);
+        Ok(())
+    })
+}
+
+/// Saves edits to a Steam game.
+#[tauri::command]
+fn save_game_override(state: State<'_, AppState>, app_id: u32, edits: OverrideInput) -> Result<UserGames, String> {
+    edit_user_games(&state, |u| u.save_override(&state.config_dir, app_id, edits))
+}
+
+/// Drops all edits to a Steam game, back to Steam's data.
+#[tauri::command]
+fn reset_game_override(state: State<'_, AppState>, app_id: u32) -> Result<UserGames, String> {
+    edit_user_games(&state, |u| {
+        u.reset_override(&state.config_dir, app_id);
+        Ok(())
+    })
+}
+
+/// Favorites or un-favorites any game (the ★ on the reveal screen).
+#[tauri::command]
+fn set_favorite(state: State<'_, AppState>, app_id: u32, favorite: bool) -> Result<UserGames, String> {
+    let steam_favorite = lock(&state.library).as_ref().is_some_and(|raw| {
+        raw.collections
+            .list
+            .iter()
+            .any(|c| c.id == steam::collections::FAVORITES_ID && c.app_ids.contains(&app_id))
+    });
+    edit_user_games(&state, |u| {
+        u.set_favorite(app_id, favorite, steam_favorite);
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -429,9 +564,16 @@ pub fn run() {
                 meta: Arc::new(MetaStore::load(&config_dir)),
                 library: Mutex::new(None),
                 session: Mutex::new(Session::default()),
+                user: Mutex::new(UserGames::load(&config_dir)),
                 http,
-                config_dir,
+                config_dir: config_dir.clone(),
             });
+            // Images the user picked for games are copied here; the UI may load them.
+            let art = usergames::art_dir(&config_dir);
+            let _ = std::fs::create_dir_all(&art);
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&art, false) {
+                eprintln!("couldn't allow user art folder {}: {e}", art.display());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -441,6 +583,12 @@ pub fn run() {
             get_backdrop,
             launch_game,
             set_blacklisted,
+            get_user_games,
+            save_custom_game,
+            delete_custom_game,
+            save_game_override,
+            reset_game_override,
+            set_favorite,
             rerolls_left,
             get_metadata_progress,
             rebuild_metadata,

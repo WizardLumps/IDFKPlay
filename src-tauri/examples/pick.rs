@@ -35,6 +35,7 @@ fn main() {
         local: scan.games,
         owned,
         collections: scan.collections,
+        user: idfkplay_lib::usergames::UserGames::load(&dir),
         api,
         warnings: scan.warnings,
     };

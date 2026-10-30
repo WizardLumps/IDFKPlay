@@ -29,6 +29,7 @@ fn game(g: G) -> LibraryGame {
             install_path: None,
             size_on_disk: None,
             playtime_minutes: g.minutes,
+            playtime_unknown: false,
             last_played: None,
         },
         meta: g.meta,

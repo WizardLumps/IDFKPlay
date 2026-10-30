@@ -1,10 +1,11 @@
 //! Combines local scan + Web API owned games + cached metadata into the list the picker uses.
 
 use crate::source::Game;
-use crate::steam::collections::Collections;
+use crate::steam::collections::{Collection, Collections, FAVORITES_ID};
 use crate::steam::store::{AppMeta, MetaStatus};
 use crate::steam::webapi::OwnedGame;
 use crate::steam::{self, SteamInfo};
+use crate::usergames::{self, UserGames};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -105,8 +106,33 @@ pub struct RawLibrary {
     pub local: Vec<Game>,
     pub owned: Option<Vec<OwnedGame>>,
     pub collections: Collections,
+    /// Games the user added and their edits to Steam games.
+    pub user: UserGames,
     pub api: ApiStatus,
     pub warnings: Vec<String>,
+}
+
+impl RawLibrary {
+    /// Steam's collections with Favorites adjusted for the user's favorites (Steam and custom games).
+    pub fn effective_collections(&self) -> Collections {
+        let mut c = self.collections.clone();
+        let steam_favs: Vec<u32> = c
+            .list
+            .iter()
+            .find(|x| x.id == FAVORITES_ID)
+            .map(|x| x.app_ids.clone())
+            .unwrap_or_default();
+        let favs = self.user.favorites(&steam_favs);
+        match c.list.iter_mut().find(|x| x.id == FAVORITES_ID) {
+            Some(fav) => fav.app_ids = favs,
+            None if !favs.is_empty() => c.list.insert(
+                0,
+                Collection { id: FAVORITES_ID.into(), name: "Favorites".into(), app_ids: favs, dynamic: false },
+            ),
+            None => {}
+        }
+        c
+    }
 }
 
 /// Union of the members of the collections with these IDs. `None` when no IDs are given.
@@ -148,6 +174,7 @@ pub fn merge(local: &[Game], owned: Option<&[OwnedGame]>) -> Vec<Game> {
                 install_path: l.and_then(|g| g.install_path.clone()),
                 size_on_disk: l.and_then(|g| g.size_on_disk),
                 playtime_minutes: o.playtime_forever.max(l.map_or(0, |g| g.playtime_minutes)),
+                playtime_unknown: false,
                 last_played: Some(o.rtime_last_played)
                     .filter(|&t| t > 0)
                     .or_else(|| l.and_then(|g| g.last_played)),
@@ -195,16 +222,51 @@ pub fn build_view(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> LibraryView
             hidden.push(HiddenGame { app_id: g.app_id, name: g.name, reason });
             continue;
         }
-        let (state, genres, categories, tags) = match m {
+        let (mut state, mut genres, mut categories, mut tags) = match m {
             None => (MetaState::Pending, vec![], vec![], vec![]),
             Some(m) if m.status == MetaStatus::Unknown => (MetaState::Unknown, vec![], vec![], vec![]),
             Some(m) => (MetaState::Known, m.genres.clone(), m.categories.clone(), m.tags.clone()),
         };
+        let mut g = g;
+        if let Some(o) = raw.user.overrides.get(&g.app_id) {
+            if let Some(name) = o.name.as_ref().filter(|n| !n.trim().is_empty()) {
+                g.name = name.trim().to_string();
+            }
+            // The user's moods replace Steam's tags and categories for filtering.
+            if let Some(moods) = &o.moods {
+                (tags, categories) = usergames::mood_tags(moods);
+                genres.clear();
+                state = MetaState::Known;
+            }
+        }
         games.push(LibraryGame { game: g, meta: state, genres, categories, tags });
     }
+    for c in &raw.user.custom {
+        let (tags, categories) = usergames::mood_tags(&c.moods);
+        games.push(LibraryGame {
+            game: Game {
+                source: usergames::SOURCE_ID,
+                app_id: c.id,
+                name: c.name.clone(),
+                // You added it to play it: always launchable.
+                installed: true,
+                install_path: None,
+                size_on_disk: None,
+                playtime_minutes: c.playtime_minutes.unwrap_or(0),
+                playtime_unknown: c.playtime_minutes.is_none(),
+                last_played: None,
+            },
+            meta: MetaState::Known,
+            genres: vec![],
+            categories,
+            tags,
+        });
+    }
+    games.sort_by_cached_key(|g| g.game.name.to_lowercase());
+
     let ids: HashSet<u32> = games.iter().map(|g| g.game.app_id).collect();
     let collections = raw
-        .collections
+        .effective_collections()
         .list
         .iter()
         .map(|c| CollectionInfo {

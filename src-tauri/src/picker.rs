@@ -101,7 +101,9 @@ pub fn is_eligible(g: &LibraryGame, req: &PickRequest, rules: &PickRules) -> boo
         && !rules.hidden.contains(&id)
         && rules.collection_members.is_none_or(|m| m.contains(&id))
         && (!req.installed_only || g.game.installed)
-        && (req.mode == Mode::JustPlay || g.game.playtime_minutes < rules.something_new_minutes)
+        // Unknown playtime (custom games without hours) never counts as "new".
+        && (req.mode == Mode::JustPlay
+            || (!g.game.playtime_unknown && g.game.playtime_minutes < rules.something_new_minutes))
         && matches_moods(g, &req.moods)
 }
 

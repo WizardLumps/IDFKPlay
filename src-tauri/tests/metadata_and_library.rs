@@ -129,6 +129,7 @@ fn local_game(app_id: u32, name: &str, installed: bool, playtime: u32) -> Game {
         install_path: installed.then(|| format!(r"C:\Steam\steamapps\common\{name}")),
         size_on_disk: installed.then_some(1_000_000),
         playtime_minutes: playtime,
+        playtime_unknown: false,
         last_played: None,
     }
 }
@@ -147,6 +148,7 @@ fn raw(local: Vec<Game>, owned: Option<&str>) -> RawLibrary {
         local,
         owned,
         collections: Default::default(),
+        user: Default::default(),
         warnings: vec![],
     }
 }

@@ -15,6 +15,8 @@ pub struct Game {
     pub install_path: Option<String>,
     pub size_on_disk: Option<u64>,
     pub playtime_minutes: u32,
+    /// Playtime isn't known (custom games without hours): never counts as "Something New".
+    pub playtime_unknown: bool,
     /// Unix seconds, when known.
     pub last_played: Option<u64>,
 }

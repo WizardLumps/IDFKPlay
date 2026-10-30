@@ -98,6 +98,7 @@ impl SteamSource {
                         install_path,
                         size_on_disk: m.size_on_disk.filter(|&s| s > 0),
                         playtime_minutes: 0,
+                        playtime_unknown: false,
                         last_played: None,
                     },
                 );
