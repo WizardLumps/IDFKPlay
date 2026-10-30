@@ -160,6 +160,7 @@ fn meta(app_type: &str) -> AppMeta {
         tags: vec!["Puzzle".into()],
         tags_fetched: true,
         fetched_at: 1,
+        assets: None,
     }
 }
 
@@ -197,7 +198,7 @@ fn view_hides_non_games_and_tracks_meta_state() {
     cache.insert(323180, meta("dlc"));
     cache.insert(
         777,
-        AppMeta { status: MetaStatus::Unknown, app_type: None, genres: vec![], categories: vec![], tags: vec![], tags_fetched: true, fetched_at: 1 },
+        AppMeta { status: MetaStatus::Unknown, app_type: None, genres: vec![], categories: vec![], tags: vec![], tags_fetched: true, fetched_at: 1, assets: None },
     );
 
     let view = library::build_view(&raw(local, None), &cache);
@@ -227,4 +228,22 @@ fn ids_needing_meta_skips_cached_and_excluded_and_puts_new_games_first() {
     cache.insert(889, AppMeta { tags_fetched: false, ..meta("game") });
     let ids = library::ids_needing_meta(&raw(local, None), &cache);
     assert_eq!(ids, [888, 887, 889]);
+}
+
+#[test]
+fn batch_assets_become_full_urls() {
+    let json = r#"{"response":{"store_items":[{"appid":2483190,"id":2483190,"success":1,"type":0,
+        "assets":{"asset_url_format":"steam/apps/2483190/${FILENAME}?t=17",
+                  "library_capsule":"711e/library_capsule.jpg",
+                  "library_capsule_2x":"711e/library_capsule_2x.jpg",
+                  "library_hero":"3eeb/library_hero.jpg",
+                  "header":"bd1e/header_alt_assets_5.jpg"}}]}}"#;
+    let item = &parse_items(json).unwrap()[0];
+    let a = item.assets.as_ref().unwrap();
+    let base = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2483190/";
+    assert_eq!(a.portrait.as_deref(), Some(format!("{base}711e/library_capsule_2x.jpg?t=17").as_str()), "2x preferred");
+    assert_eq!(a.hero.as_deref(), Some(format!("{base}3eeb/library_hero.jpg?t=17").as_str()));
+    assert_eq!(a.header.as_deref(), Some(format!("{base}bd1e/header_alt_assets_5.jpg?t=17").as_str()));
+    // Carried into the cache.
+    assert_eq!(to_meta(item, &HashMap::new(), 1).assets.as_ref(), Some(a));
 }

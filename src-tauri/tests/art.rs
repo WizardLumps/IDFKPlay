@@ -72,7 +72,7 @@ fn falls_back_to_cdn() {
     let steam = &tmp.0;
     touch(&steam.join("appcache").join("librarycache").join("620").join("library_600x900.jpg"));
 
-    let art = game_art(Some(steam), 620);
+    let art = game_art(Some(steam), 620, None);
     assert!(matches!(&art.portrait[0], ArtSource::File(p) if p.ends_with("library_600x900.jpg")));
     assert_eq!(
         art.portrait[1],
@@ -82,6 +82,32 @@ fn falls_back_to_cdn() {
     assert_eq!(art.hero.len(), 1);
     assert!(matches!(&art.hero[0], ArtSource::Url(u) if u.ends_with("/620/library_hero.jpg")));
 
-    let no_steam = game_art(None, 1145360);
+    let no_steam = game_art(None, 1145360, None);
     assert_eq!(no_steam.header, [ArtSource::Url("https://cdn.cloudflare.steamstatic.com/steam/apps/1145360/header.jpg".into())]);
+}
+
+#[test]
+fn newer_games_use_library_capsule_for_the_cover() {
+    let tmp = TempDir::new("capsule");
+    let cache = &tmp.0;
+    touch(&cache.join("2483190").join("711e3980").join("library_capsule.jpg"));
+    assert_eq!(
+        find_local(cache, 2483190, ArtKind::Portrait),
+        Some(cache.join("2483190").join("711e3980").join("library_capsule.jpg"))
+    );
+}
+
+#[test]
+fn store_asset_urls_come_before_the_classic_cdn() {
+    use idfkplay_lib::steam::art::StoreAssets;
+    let assets = StoreAssets {
+        portrait: Some("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1/a/library_capsule.jpg".into()),
+        header: None,
+        hero: None,
+    };
+    let art = game_art(None, 1, Some(&assets));
+    assert_eq!(art.portrait[0], ArtSource::Url(assets.portrait.clone().unwrap()));
+    assert!(matches!(&art.portrait[1], ArtSource::Url(u) if u.ends_with("/1/library_600x900.jpg")));
+    // No store URL for the header: classic CDN only.
+    assert_eq!(art.header.len(), 1);
 }

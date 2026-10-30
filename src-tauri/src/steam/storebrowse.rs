@@ -2,8 +2,12 @@
 //! tags for ~100 apps per request, so a whole library is learned in seconds.
 //! Tags and categories arrive as numeric IDs; tag names come from `IStoreService/GetTagList`.
 
+use super::art::StoreAssets;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+
+/// Where `asset_url_format` paths are served from (the cloudflare twin only redirects here).
+const ASSET_BASE: &str = "https://shared.akamai.steamstatic.com/store_item_assets/";
 
 const GET_ITEMS_URL: &str = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/";
 pub const TAG_LIST_URL: &str = "https://api.steampowered.com/IStoreService/GetTagList/v1/?language=english";
@@ -73,6 +77,26 @@ pub struct Item {
     pub categories: Vec<String>,
     /// Most-voted first.
     pub tag_ids: Vec<u32>,
+    /// Exact art URLs (newer games aren't on the classic CDN paths).
+    pub assets: Option<StoreAssets>,
+}
+
+/// Builds full URLs from `assets.asset_url_format` (e.g. `steam/apps/1/${FILENAME}?t=2`) and file paths.
+fn parse_assets(v: Option<&Value>) -> Option<StoreAssets> {
+    let a = v?.as_object()?;
+    let format = a.get("asset_url_format")?.as_str()?;
+    let url = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| a.get(*k).and_then(Value::as_str))
+            .filter(|p| !p.is_empty())
+            .map(|p| format!("{ASSET_BASE}{}", format.replace("${FILENAME}", p)))
+    };
+    let assets = StoreAssets {
+        portrait: url(&["library_capsule_2x", "library_capsule"]),
+        header: url(&["header", "main_capsule"]),
+        hero: url(&["library_hero", "library_hero_2x"]),
+    };
+    (assets != StoreAssets::default()).then_some(assets)
 }
 
 pub fn items_url(app_ids: &[u32]) -> Result<reqwest::Url, String> {
@@ -80,7 +104,7 @@ pub fn items_url(app_ids: &[u32]) -> Result<reqwest::Url, String> {
         "ids": app_ids.iter().map(|id| json!({ "appid": id })).collect::<Vec<_>>(),
         // English names and a fixed country so results don't depend on the user's region.
         "context": { "language": "english", "country_code": "US" },
-        "data_request": { "include_tag_count": TAG_COUNT },
+        "data_request": { "include_tag_count": TAG_COUNT, "include_assets": true },
     });
     reqwest::Url::parse_with_params(GET_ITEMS_URL, &[("input_json", input.to_string())]).map_err(|e| e.to_string())
 }
@@ -111,7 +135,14 @@ pub fn parse_items(json: &str) -> Result<Vec<Item>, String> {
                 .or_else(|| it.get("id").and_then(Value::as_u64))
                 .and_then(|a| u32::try_from(a).ok())?;
             if it.get("success").and_then(Value::as_u64) != Some(SUCCESS) {
-                return Some(Item { app_id, found: false, app_type: None, categories: vec![], tag_ids: vec![] });
+                return Some(Item {
+                    app_id,
+                    found: false,
+                    app_type: None,
+                    categories: vec![],
+                    tag_ids: vec![],
+                    assets: None,
+                });
             }
 
             let mut categories: Vec<String> = Vec::new();
@@ -148,6 +179,7 @@ pub fn parse_items(json: &str) -> Result<Vec<Item>, String> {
                 app_type: it.get("type").and_then(Value::as_u64).map(app_type_name),
                 categories,
                 tag_ids,
+                assets: parse_assets(it.get("assets")),
             })
         })
         .collect())

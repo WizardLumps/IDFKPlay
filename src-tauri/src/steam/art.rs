@@ -1,11 +1,16 @@
-//! Game art: Steam's local library cache first, then Steam's public CDN.
+//! Game art: Steam's local library cache first, then the store's exact asset URLs,
+//! then Steam's classic CDN paths.
 //!
 //! Local layouts seen in the wild:
 //! - old flat:  `librarycache\<appid>_library_600x900.jpg`
 //! - per-app:   `librarycache\<appid>\library_600x900.jpg`, with some images
 //!   (hero, header) one level down in hash-named folders.
+//! - newer games name the cover `library_capsule.jpg` instead of `library_600x900.jpg`.
+//!
+//! Newer games also aren't on the classic CDN paths (`/steam/apps/<id>/library_600x900.jpg`
+//! is a 404); their art lives under hashed paths the batch store service reports.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,7 +30,12 @@ impl ArtKind {
     /// File names to look for locally, best first.
     fn local_names(self) -> &'static [&'static str] {
         match self {
-            ArtKind::Portrait => &["library_600x900_2x.jpg", "library_600x900.jpg"],
+            ArtKind::Portrait => &[
+                "library_600x900_2x.jpg",
+                "library_600x900.jpg",
+                "library_capsule_2x.jpg",
+                "library_capsule.jpg",
+            ],
             ArtKind::Header => &["header.jpg", "library_header.jpg"],
             ArtKind::Hero => &["library_hero.jpg"],
         }
@@ -36,6 +46,25 @@ impl ArtKind {
             ArtKind::Portrait => "library_600x900.jpg",
             ArtKind::Header => "header.jpg",
             ArtKind::Hero => "library_hero.jpg",
+        }
+    }
+}
+
+/// Exact image URLs from the batch store service (see `storebrowse`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreAssets {
+    pub portrait: Option<String>,
+    pub header: Option<String>,
+    pub hero: Option<String>,
+}
+
+impl StoreAssets {
+    fn get(&self, kind: ArtKind) -> Option<&str> {
+        match kind {
+            ArtKind::Portrait => self.portrait.as_deref(),
+            ArtKind::Header => self.header.as_deref(),
+            ArtKind::Hero => self.hero.as_deref(),
         }
     }
 }
@@ -93,14 +122,21 @@ pub fn cdn_url(app_id: u32, kind: ArtKind) -> String {
     format!("{CDN}/{app_id}/{}", kind.cdn_name())
 }
 
-pub fn game_art(steam: Option<&Path>, app_id: u32) -> GameArt {
+/// Candidates per slot: local cache, then the store's exact URL (if known), then the classic CDN path.
+pub fn game_art(steam: Option<&Path>, app_id: u32, assets: Option<&StoreAssets>) -> GameArt {
     let cache = steam.map(library_cache_dir);
     let slot = |kind| {
         let mut v = Vec::new();
         if let Some(p) = cache.as_deref().and_then(|c| find_local(c, app_id, kind)) {
             v.push(ArtSource::File(p.display().to_string()));
         }
-        v.push(ArtSource::Url(cdn_url(app_id, kind)));
+        if let Some(url) = assets.and_then(|a| a.get(kind)) {
+            v.push(ArtSource::Url(url.to_string()));
+        }
+        let classic = cdn_url(app_id, kind);
+        if !v.iter().any(|s| *s == ArtSource::Url(classic.clone())) {
+            v.push(ArtSource::Url(classic));
+        }
         v
     };
     GameArt { portrait: slot(ArtKind::Portrait), header: slot(ArtKind::Header), hero: slot(ArtKind::Hero) }

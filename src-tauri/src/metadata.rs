@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 const CACHE_FILE: &str = "metadata-cache.json";
-/// v1 came from per-app store lookups + SteamSpy; v2 from the batch service.
-const CACHE_VERSION: u32 = 2;
+/// v1: per-app store lookups + SteamSpy. v2: batch service. v3: adds store art URLs.
+const CACHE_VERSION: u32 = 3;
 const TAG_NAMES_FILE: &str = "tag-names.json";
 const TAG_NAMES_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 const REQUEST_INTERVAL: Duration = Duration::from_secs(1);
@@ -81,6 +81,7 @@ pub fn to_meta(item: &Item, names: &HashMap<u32, String>, now: u64) -> AppMeta {
             tags: vec![],
             tags_fetched: true,
             fetched_at: now,
+            assets: None,
         };
     }
     let (tags, unknown) = storebrowse::tag_names(&item.tag_ids, names);
@@ -93,6 +94,7 @@ pub fn to_meta(item: &Item, names: &HashMap<u32, String>, now: u64) -> AppMeta {
         // Tag IDs we couldn't name yet are retried on a later run.
         tags_fetched: unknown == 0,
         fetched_at: now,
+        assets: item.assets.clone(),
     }
 }
 

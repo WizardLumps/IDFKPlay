@@ -1,6 +1,7 @@
 //! Cached per-app store metadata (type, categories, tags). Fetched in batches by
 //! `metadata.rs` via `storebrowse.rs`.
 
+use super::art::StoreAssets;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -30,6 +31,9 @@ pub struct AppMeta {
     #[serde(default)]
     pub tags_fetched: bool,
     pub fetched_at: u64,
+    /// Exact art URLs from the store (newer games aren't on the classic CDN paths).
+    #[serde(default)]
+    pub assets: Option<StoreAssets>,
 }
 
 impl AppMeta {

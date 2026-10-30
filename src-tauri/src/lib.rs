@@ -15,6 +15,8 @@ use metadata::{MetaStore, Progress};
 use picker::{PickDecision, PickKind, PickRequest, PickRules, Session};
 use serde::{Deserialize, Serialize};
 use settings::{AfterLaunch, Settings};
+use std::collections::HashMap;
+use steam::store::AppMeta;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use steam::webapi::{self, OwnedGame};
@@ -174,7 +176,8 @@ async fn pick_game(
     if !raw.api.has_owned() {
         request.installed_only = true;
     }
-    let view = library::build_view(&raw, &state.meta.snapshot());
+    let meta = state.meta.snapshot();
+    let view = library::build_view(&raw, &meta);
     let settings = state.settings();
     let members = library::collection_members(&raw.collections, &request.collections);
     let rules = PickRules {
@@ -215,7 +218,7 @@ async fn pick_game(
     };
 
     let steam_path = PathBuf::from(&raw.info.steam_path);
-    let art = game.as_ref().map(|g| steam::art::game_art(Some(&steam_path), g.game.app_id));
+    let art = game.as_ref().map(|g| art_for(&meta, &steam_path, g.game.app_id));
     let reel = game
         .as_ref()
         .map(|g| picker::reel(&pool, g.game.app_id, REEL_LEN, picker::random_u64()))
@@ -224,7 +227,7 @@ async fn pick_game(
         .map(|g| ReelItem {
             app_id: g.game.app_id,
             name: g.game.name.clone(),
-            portrait: steam::art::game_art(Some(&steam_path), g.game.app_id).portrait,
+            portrait: art_for(&meta, &steam_path, g.game.app_id).portrait,
         })
         .collect();
     Ok(PickOutcome {
@@ -252,7 +255,8 @@ struct BackdropItem {
 async fn get_backdrop(app: AppHandle, state: State<'_, AppState>, count: usize) -> Result<Vec<BackdropItem>, String> {
     let raw = current_library(app, &state, false).await?;
     let settings = state.settings();
-    let view = library::build_view(&raw, &state.meta.snapshot());
+    let meta = state.meta.snapshot();
+    let view = library::build_view(&raw, &meta);
     let steam_path = PathBuf::from(&raw.info.steam_path);
     let cache = steam::art::library_cache_dir(&steam_path);
     let favorites: Vec<u32> = raw
@@ -278,15 +282,22 @@ async fn get_backdrop(app: AppHandle, state: State<'_, AppState>, count: usize) 
 
     Ok(backdrop::choose(&candidates, count.min(60), backdrop::seed())
         .into_iter()
-        .map(|id| BackdropItem { app_id: id, portrait: steam::art::game_art(Some(&steam_path), id).portrait })
+        .map(|id| BackdropItem { app_id: id, portrait: art_for(&meta, &steam_path, id).portrait })
         .collect())
 }
 
-/// Art candidates for a game, local cache first then CDN.
+/// Art candidates for a game: local cache, the store's exact URLs, then the classic CDN.
+fn art_for(meta: &HashMap<u32, AppMeta>, steam_path: &Path, app_id: u32) -> steam::art::GameArt {
+    let assets = meta.get(&app_id).and_then(|m| m.assets.as_ref());
+    steam::art::game_art(Some(steam_path), app_id, assets)
+}
+
 #[tauri::command]
 fn get_art(state: State<'_, AppState>, app_id: u32) -> steam::art::GameArt {
     let steam_path = lock(&state.library).as_ref().map(|r| PathBuf::from(&r.info.steam_path));
-    steam::art::game_art(steam_path.as_deref(), app_id)
+    let meta = state.meta.snapshot();
+    let assets = meta.get(&app_id).and_then(|m| m.assets.as_ref());
+    steam::art::game_art(steam_path.as_deref(), app_id, assets)
 }
 
 #[derive(Serialize)]
