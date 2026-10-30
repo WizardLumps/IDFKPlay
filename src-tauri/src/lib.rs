@@ -551,6 +551,8 @@ fn rerolls_left(state: State<'_, AppState>) -> Option<u32> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // File pickers for custom games (program and image).
+        .plugin(tauri_plugin_dialog::init())
         // Remembers window size/position between launches.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {

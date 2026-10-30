@@ -3,7 +3,7 @@
   import { branding } from "../lib/branding";
   import Reveal from "../lib/Reveal.svelte";
   import Backdrop from "../lib/Backdrop.svelte";
-  import { app, hasOwnedGames, installedOnly, updateSettings } from "../lib/state.svelte";
+  import { app, applyUserGames, hasOwnedGames, installedOnly, updateSettings } from "../lib/state.svelte";
 
   interface Props {
     onSettings: () => void;
@@ -153,6 +153,20 @@
     }
   }
 
+  /** The ★ on the reveal: works for Steam and custom games alike. */
+  async function toggleFavorite() {
+    if (!reveal) return;
+    const r = reveal;
+    r.error = "";
+    try {
+      const next = !r.game.favorite;
+      await applyUserGames(await api.setFavorite(r.game.appId, next));
+      r.game.favorite = next;
+    } catch (e) {
+      r.error = (e as Error).message;
+    }
+  }
+
   async function launch() {
     if (!reveal || reveal.launched) return;
     const r = reveal;
@@ -285,6 +299,7 @@
       onReroll={reroll}
       onCancel={() => (reveal = null)}
       onBlacklist={blacklist}
+      onFavorite={toggleFavorite}
     />
   {/if}
 </section>

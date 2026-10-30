@@ -27,6 +27,11 @@ Grab **`IDFKPlay_x.y.z_x64-setup.exe`** from the [latest release](../../releases
     A game must match *any* genre you pick and *every* feature you pick.
   - **Your Steam collections**, Favorites included: pick from any you select.
 - **Never show this again** for games you're done with; manage the list in Settings.
+- **Games from other launchers**: add any game in *Settings → Games* with a program (plus arguments) or a
+  launcher link, a cover image, moods, and hours played. Battle.net games launch through Battle.net so you're
+  signed in automatically (`Battle.net.exe` with `--exec="launch WoW"`, using the game's code).
+- **Edit any game**: fix a missing cover, rename it, set your own moods, or favorite it. ★ on the reveal
+  screen adds or removes a favorite; the Favorites chip combines Steam's favorites with yours.
 - Games you've hidden in Steam, DLC, soundtracks, tools and redistributables are skipped automatically.
 - Finds Steam and every library on every drive by itself. Works offline once it has learned your library.
 
@@ -59,6 +64,8 @@ Settings and caches live in `%APPDATA%\IDFKPlay\`:
 | `owned-games.json` | Last list of owned games from Steam (used when offline) |
 | `metadata-cache.json` | Type, categories and tags per game |
 | `tag-names.json` | Steam's tag names (refreshed monthly) |
+| `games.json` | Games you added and your edits to Steam games |
+| `art\` | Copies of images you picked for games |
 
 Delete the folder to reset everything.
 

@@ -30,7 +30,7 @@
         "enable": true,
         "scope": []
       },
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https://cdn.cloudflare.steamstatic.com https://shared.akamai.steamstatic.com https://shared.cloudflare.steamstatic.com data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420"
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420"
     }
   },
   "bundle": {

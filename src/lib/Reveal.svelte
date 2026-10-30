@@ -33,6 +33,7 @@
     onReroll: () => void;
     onCancel: () => void;
     onBlacklist: () => void;
+    onFavorite: () => void;
   }
 
   let {
@@ -50,6 +51,7 @@
     onReroll,
     onCancel,
     onBlacklist,
+    onFavorite,
   }: Props = $props();
 
   const c = branding.copy;
@@ -200,10 +202,20 @@
           </div>
 
           <div class="info">
-            <span class="badge" class:off={!game.installed}>{badge}</span>
+            <div class="badges">
+              <span class="badge" class:off={!game.installed}>{badge}</span>
+              <button
+                class="fav"
+                class:on={game.favorite}
+                aria-pressed={game.favorite}
+                title={game.favorite ? "Remove from Favorites" : "Add to Favorites"}
+                onclick={onFavorite}
+                disabled={busy}>★</button
+              >
+            </div>
             <h2 id="reveal-title">{game.name}</h2>
             <p class="meta">
-              {formatPlaytime(game.playtimeMinutes)}
+              {game.playtimeUnknown ? "Playtime unknown" : formatPlaytime(game.playtimeMinutes)}
               {#if blurb.length}<span class="dot">·</span>{blurb.join(", ")}{/if}
             </p>
 
@@ -437,6 +449,37 @@
     background: rgba(102, 192, 244, 0.2);
     color: var(--accent);
     backdrop-filter: blur(6px);
+  }
+
+  .badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .fav {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 17px;
+    line-height: 1;
+    color: rgba(230, 237, 243, 0.55);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(6px);
+    transition:
+      color var(--t-fast) var(--ease),
+      transform var(--t-fast) var(--ease);
+  }
+
+  .fav:hover:not(:disabled) {
+    color: #f5c451;
+    transform: scale(1.08);
+  }
+
+  .fav.on {
+    color: #f5c451;
+    border-color: rgba(245, 196, 81, 0.5);
   }
 
   .badge.off {

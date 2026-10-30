@@ -3,9 +3,10 @@
   import MainScreen from "./screens/MainScreen.svelte";
   import SettingsScreen from "./screens/SettingsScreen.svelte";
   import DebugLibrary from "./screens/DebugLibrary.svelte";
+  import GamesScreen from "./screens/GamesScreen.svelte";
   import { init } from "./lib/state.svelte";
 
-  type Screen = "main" | "settings" | "debug";
+  type Screen = "main" | "settings" | "debug" | "games";
   let screen = $state<Screen>("main");
 
   // Scan at startup so tag learning starts in the background right away.
@@ -25,8 +26,14 @@
           <MainScreen onSettings={() => (screen = "settings")} />
         {:else if screen === "debug"}
           <DebugLibrary onBack={() => (screen = "settings")} />
+        {:else if screen === "games"}
+          <GamesScreen onBack={() => (screen = "settings")} />
         {:else}
-          <SettingsScreen onBack={() => (screen = "main")} onDebug={() => (screen = "debug")} />
+          <SettingsScreen
+            onBack={() => (screen = "main")}
+            onDebug={() => (screen = "debug")}
+            onGames={() => (screen = "games")}
+          />
         {/if}
       </div>
     {/key}

@@ -7,9 +7,10 @@
   interface Props {
     onBack: () => void;
     onDebug: () => void;
+    onGames: () => void;
   }
 
-  let { onBack, onDebug }: Props = $props();
+  let { onBack, onDebug, onGames }: Props = $props();
 
   // Drafts for text fields; saved on explicit action so half-typed paths don't trigger rescans.
   let steamPathDraft = $state(app.settings?.steamPath ?? "");
@@ -147,6 +148,19 @@
   {#if !app.settings}
     <p class="dim">Loading…</p>
   {:else}
+    <!-- Games -->
+    <div class="card">
+      <h3>Games</h3>
+      <p class="dim">
+        Add games from other launchers (Battle.net, Epic, GOG…), fix missing art, set moods and favorites, or hide
+        games.
+        {#if app.userGames?.custom.length}You've added {app.userGames.custom.length}.{/if}
+      </p>
+      <div class="row">
+        <button onclick={onGames}>Manage games</button>
+      </div>
+    </div>
+
     <!-- Steam -->
     <div class="card">
       <h3>Steam</h3>

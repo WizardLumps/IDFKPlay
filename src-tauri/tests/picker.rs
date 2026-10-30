@@ -36,6 +36,8 @@ fn game(g: G) -> LibraryGame {
         genres: strings(g.genres),
         categories: strings(g.categories),
         tags: strings(g.tags),
+        favorite: false,
+        edited: false,
     }
 }
 

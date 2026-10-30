@@ -65,6 +65,10 @@ pub struct LibraryGame {
     pub genres: Vec<String>,
     pub categories: Vec<String>,
     pub tags: Vec<String>,
+    /// In Favorites (Steam's, adjusted by the user's edits, or a favorite custom game).
+    pub favorite: bool,
+    /// The user edited this Steam game (name, image, moods or favorite).
+    pub edited: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -210,6 +214,13 @@ pub fn excluded_by_name(app_id: u32, name: &str) -> Option<String> {
 }
 
 pub fn build_view(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> LibraryView {
+    let effective = raw.effective_collections();
+    let favorites: HashSet<u32> = effective
+        .list
+        .iter()
+        .find(|c| c.id == FAVORITES_ID)
+        .map(|c| c.app_ids.iter().copied().collect())
+        .unwrap_or_default();
     let mut games = Vec::new();
     let mut hidden = Vec::new();
     for g in merge(&raw.local, raw.owned.as_deref()) {
@@ -239,7 +250,9 @@ pub fn build_view(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> LibraryView
                 state = MetaState::Known;
             }
         }
-        games.push(LibraryGame { game: g, meta: state, genres, categories, tags });
+        let favorite = favorites.contains(&g.app_id);
+        let edited = raw.user.overrides.contains_key(&g.app_id);
+        games.push(LibraryGame { game: g, meta: state, genres, categories, tags, favorite, edited });
     }
     for c in &raw.user.custom {
         let (tags, categories) = usergames::mood_tags(&c.moods);
@@ -260,13 +273,14 @@ pub fn build_view(raw: &RawLibrary, meta: &HashMap<u32, AppMeta>) -> LibraryView
             genres: vec![],
             categories,
             tags,
+            favorite: c.favorite,
+            edited: false,
         });
     }
     games.sort_by_cached_key(|g| g.game.name.to_lowercase());
 
     let ids: HashSet<u32> = games.iter().map(|g| g.game.app_id).collect();
-    let collections = raw
-        .effective_collections()
+    let collections = effective
         .list
         .iter()
         .map(|c| CollectionInfo {

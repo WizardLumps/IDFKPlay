@@ -75,6 +75,8 @@ export interface Game {
   installPath: string | null;
   sizeOnDisk: number | null;
   playtimeMinutes: number;
+  /** Custom games without hours: never counts as Something New. */
+  playtimeUnknown: boolean;
   lastPlayed: number | null;
 }
 
@@ -85,6 +87,67 @@ export interface LibraryGame extends Game {
   genres: string[];
   categories: string[];
   tags: string[];
+  favorite: boolean;
+  /** A Steam game the user edited. */
+  edited: boolean;
+}
+
+// ---- Games the user adds, and edits to Steam games (mirrors usergames.rs) ----
+
+/** IDs at or above this are games the user added. */
+export const CUSTOM_ID_BASE = 2_000_000_000;
+export const isCustom = (id: number) => id >= CUSTOM_ID_BASE;
+
+export type Launch = { kind: "program"; path: string; args: string } | { kind: "link"; url: string };
+
+export interface CustomGame {
+  id: number;
+  name: string;
+  launch: Launch;
+  /** File name in IDFKPlay's art folder, or an https URL. */
+  image: string | null;
+  moods: Mood[];
+  favorite: boolean;
+  /** null = unknown. */
+  playtimeMinutes: number | null;
+}
+
+export interface GameOverride {
+  name: string | null;
+  image: string | null;
+  moods: Mood[] | null;
+  favorite: boolean | null;
+}
+
+export interface UserGames {
+  custom: CustomGame[];
+  overrides: Record<string, GameOverride>;
+}
+
+export type ImageChange =
+  | { kind: "keep" }
+  | { kind: "file"; path: string }
+  | { kind: "url"; url: string }
+  | { kind: "clear" };
+
+export interface CustomGameInput {
+  /** null = add a new game. */
+  id: number | null;
+  name: string;
+  launch: Launch;
+  image: ImageChange;
+  moods: Mood[];
+  favorite: boolean;
+  /** null = unknown. */
+  playtimeHours: number | null;
+}
+
+/** Edits to a Steam game; null keeps Steam's value. */
+export interface OverrideInput {
+  name: string | null;
+  image: ImageChange;
+  moods: Mood[] | null;
+  favorite: boolean | null;
 }
 
 export interface LibraryInfo {
@@ -185,6 +248,12 @@ export const api = {
   setBlacklisted: (appId: number, blacklisted: boolean) =>
     call<Settings>("set_blacklisted", { appId, blacklisted }),
   rerollsLeft: () => call<number | null>("rerolls_left"),
+  getUserGames: () => call<UserGames>("get_user_games"),
+  saveCustomGame: (game: CustomGameInput) => call<UserGames>("save_custom_game", { game }),
+  deleteCustomGame: (appId: number) => call<UserGames>("delete_custom_game", { appId }),
+  saveGameOverride: (appId: number, edits: OverrideInput) => call<UserGames>("save_game_override", { appId, edits }),
+  resetGameOverride: (appId: number) => call<UserGames>("reset_game_override", { appId }),
+  setFavorite: (appId: number, favorite: boolean) => call<UserGames>("set_favorite", { appId, favorite }),
   getMetadataProgress: () => call<MetaProgress>("get_metadata_progress"),
   rebuildMetadata: () => call<void>("rebuild_metadata"),
   getApiKeyStatus: () => call<ApiKeyStatus>("get_api_key_status"),

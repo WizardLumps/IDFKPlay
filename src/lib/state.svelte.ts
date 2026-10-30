@@ -1,5 +1,13 @@
 // App-wide state shared by the main and settings screens.
-import { api, type ApiKeyStatus, type BackdropItem, type LibraryView, type MetaProgress, type Settings } from "./api";
+import {
+  api,
+  type ApiKeyStatus,
+  type BackdropItem,
+  type LibraryView,
+  type MetaProgress,
+  type Settings,
+  type UserGames,
+} from "./api";
 
 export const app = $state({
   settings: null as Settings | null,
@@ -13,7 +21,15 @@ export const app = $state({
   backdrop: null as BackdropItem[] | null,
   /** Tag learning has been running a while: show the "keep the app open" note. */
   learningSlow: false,
+  /** Games the user added and their edits to Steam games. */
+  userGames: null as UserGames | null,
 });
+
+/** Applies the result of a game edit and refreshes the list (no rescan needed). */
+export async function applyUserGames(userGames: UserGames) {
+  app.userGames = userGames;
+  await loadLibrary(false);
+}
 
 /** Rescan when the window regains focus, at most this often (catches new purchases/installs). */
 const FOCUS_RESCAN_MIN_MS = 60_000;
@@ -109,12 +125,14 @@ export async function init() {
     }
   });
 
-  const [settings, keyStatus, progress] = await Promise.all([
+  const [settings, keyStatus, progress, userGames] = await Promise.all([
     api.getSettings(),
     api.getApiKeyStatus(),
     api.getMetadataProgress(),
+    api.getUserGames(),
   ]);
   app.settings = settings;
+  app.userGames = userGames;
   app.keyStatus = keyStatus;
   app.progress = progress;
   await loadLibrary(false);
